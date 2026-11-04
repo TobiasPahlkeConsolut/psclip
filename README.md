@@ -112,6 +112,11 @@ Press the hotkey anywhere. The popup opens at the mouse cursor:
 | `Shift+Delete`                 | Remove the entry                                 |
 | `Esc`, click elsewhere         | Close                                            |
 
+Words from a screenshot find it - here "timed out", with the preview (`F3`) showing the image and the recognized
+text:
+
+<img src="docs/search-image-dark.png" alt="Searching for 'timed out' finds a screenshot of an error message; the preview shows the image and the recognized text" width="60%">
+
 Right-click an entry for the same actions (*Paste as plain text* appears for entries with formatting). You can resize
 the popup while it is open; the next time it opens at the chosen size again. The preview makes the popup taller and
 stays on or off until psclip exits (`-Preview` to start with it).
@@ -231,6 +236,8 @@ See [AGENTS.md](AGENTS.md) for the conventions and pitfalls of this code base. T
 
 The end-to-end test runs a separate instance with its own name and hotkey and only ever closes that one, so a psclip
 you are using keeps running - it just records the test's clipboard entries (they start with `psclip test:`).
+
+`.\tests\New-DocsScreenshots.ps1` takes the screenshots in `docs\` the same way, with sample content.
 
 ## Internal use
 

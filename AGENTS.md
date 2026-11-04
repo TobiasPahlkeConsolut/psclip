@@ -119,6 +119,8 @@ history, Popup, Theme, Text in images (OCR), Keep awake, Window construction, Ma
   quoted word); pass such text through a file (see Git below).
 - `$input`, `$args`, `$matches`, `$event`, `$sender` and `$this` are automatic variables - do not use them as names.
 - Under StrictMode, `$hashtable.MissingKey` throws; use `ContainsKey` where a key may be missing (e.g. cleanup code).
+- `$PSScriptRoot` is empty in `param()` default values of a script run with `-File` in 5.1; set such defaults in
+  the script body.
 - In tests, find windows and controls by process id and class name, not by asking which control has the focus:
   right after a window appears the focus may still be elsewhere.
 - Pester 3: `Assert-MockCalled` counts calls in the whole `Describe` by default - always pass `-Scope It`.
@@ -154,8 +156,9 @@ history, Popup, Theme, Text in images (OCR), Keep awake, Window construction, Ma
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Dark
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Light
    ```
-   Exit code 0 = all steps passed. Look at the screenshots it writes to `%TEMP%\ClipboardManagerTests`; copy
-   `popup-pinned-*.png` to `docs/popup-*.png` when the look of the popup changes.
+   Exit code 0 = all steps passed. Look at the screenshots it writes to `%TEMP%\ClipboardManagerTests`.
+5. When the look of the popup changes, run `tests\New-DocsScreenshots.ps1` (same rules: ask first) and check the
+   new `docs\*.png` before committing them.
 
 ## Git
 
