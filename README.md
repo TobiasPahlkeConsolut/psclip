@@ -17,6 +17,7 @@ The history lives in memory only and is gone when the script exits.
 - **Keeps the formatting** (HTML and RTF, e.g. from Word, Outlook or a browser): `Enter` pastes with formatting,
   `Shift+Enter` as plain text
 - **Images** too, e.g. screenshots: shown with a thumbnail, found by typing `image`; the last 20 are kept
+- **Preview** (`F3`) of the selected entry below the list: the full text or the image
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"
 - **Dark mode** (default) or light mode, switchable from the tray menu
 - **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
@@ -104,12 +105,14 @@ Press the hotkey anywhere. The popup opens at the mouse cursor:
 | `Up` / `Down`, `PgUp` / `PgDn` | Move the selection                               |
 | `Enter`, double-click          | Paste the entry into the window that was active, with its formatting |
 | `Shift+Enter`                  | Paste it as plain text                           |
+| `F3`                           | Show / hide the preview: full text or image, length, time copied |
 | `Ctrl+P`                       | Pin / unpin the entry                            |
 | `Shift+Delete`                 | Remove the entry                                 |
 | `Esc`, click elsewhere         | Close                                            |
 
 Right-click an entry for the same actions (*Paste as plain text* appears for entries with formatting). You can resize
-the popup while it is open; the next time it opens at the chosen size again.
+the popup while it is open; the next time it opens at the chosen size again. The preview makes the popup taller and
+stays on or off until psclip exits (`-Preview` to start with it).
 
 The **tray icon** (a small blue clipboard, possibly in the `^` overflow area of the taskbar):
 
@@ -147,6 +150,7 @@ windows). Windows then never sees the session as idle. While you are working, no
 | `-MaxItems`         | `200`    | Unpinned entries to keep                                                    |
 | `-MaxEntryLength`   | `1000000`| Texts with more characters are not recorded                                 |
 | `-MaxImages`        | `20`     | Unpinned images to keep (they need much more memory than text); `0` = none  |
+| `-Preview`          | off      | Start with the preview (`F3`) shown                                         |
 | `-KeepAwake`        | off      | Start with *Keep awake* switched on                                         |
 | `-KeepAwakeSeconds` | `30`     | Idle seconds before *Keep awake* presses F15                                |
 | `-InstanceName`     | `PsClipboardManager` | Only to run a second, separate instance (the end-to-end test does)  |

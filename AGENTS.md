@@ -89,7 +89,11 @@ history, Popup, Theme, Keep awake, Window construction, Main.
   `PsClip.Native.ReadFormatBytes`. `DataObject.GetData()` deserializes them with BinaryFormatter, i.e. runs code
   chosen by whoever put them on the clipboard (another program, an RDP session). `GetDataPresent()` is safe.
 - The popup is resized to the configured size (`$PopupSizes`, `-Size`) every time it opens (`Reset-PopupSize`);
-  manual resizing is intentionally temporary.
+  manual resizing is intentionally temporary. The preview (`F3`, `$Ui.Preview`) is a bottom-docked panel; showing
+  it makes the popup taller by its height (`Switch-Preview`, `Move-PopupIntoScreen`).
+- `Hide-Popup` empties the list and the preview: hidden controls can still be read by other programs
+  (`LB_GETTEXT`, `WM_GETTEXT`), so no history content stays in them while the popup is closed.
+- `Update-StatusText` drops the last key hints until the line fits the popup's width.
 - Context menus use `PsClip.MenuRenderer` (check marks and arrows in the text color). Submenus are separate
   drop-downs: give them the renderer in `Set-Theme` as well.
 - Keep awake (unrelated to the clipboard) is a WinForms timer ticking every second; `Test-KeepAwakeDue` decides,

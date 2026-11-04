@@ -29,6 +29,7 @@ function Reset-TestState {
         HotkeyActive        = $true
         ThemeSetting        = 'Dark'
         PopupSize           = 'M'
+        PreviewVisible      = $false
         KeepAwake           = $false
         IsDark              = $null
         Colors              = $null
@@ -627,6 +628,7 @@ Describe 'Update-PopupList' {
         $script:Ui.Search = [System.Windows.Forms.TextBox]::new()
         $script:Ui.List = [System.Windows.Forms.ListBox]::new()
         $script:Ui.Status = [System.Windows.Forms.Label]::new()
+        $Ui.Status.Width = 2000   # wide enough for every hint
         Add-Entries 'one', 'two', 'three'   # history: three, two, one
         Switch-ClipboardPin (Get-Entry 'one')
     }
@@ -687,6 +689,9 @@ Describe 'Hide-Popup' {
         }
         $script:Ui.Form = $form
         $script:Ui.List = [System.Windows.Forms.ListBox]::new()
+        $script:Ui.PreviewInfo = [pscustomobject]@{ Text = '12 characters' }
+        $script:Ui.PreviewText = [pscustomobject]@{ Text = 'secret text' }
+        $script:Ui.PreviewImage = [pscustomobject]@{ Image = $null }
         [void]$Ui.List.Items.Add('secret preview')
         $State.Filtered.Add([PsClip.ClipEntry]::new('secret'))
 
@@ -694,8 +699,58 @@ Describe 'Hide-Popup' {
 
         $form.Hides | Should Be 1
         $Ui.List.Items.Count | Should Be 0
+        $Ui.PreviewText.Text | Should BeExactly ''
         $State.Filtered.Count | Should Be 0
         $Ui.List.Dispose()
+    }
+}
+
+Describe 'Preview' {
+    It 'describes a text entry: length, formatting, time copied' {
+        $entry = New-FormattedEntry ('x' * 1234) -Rtf '{\rtf1 x}'
+        $info = Get-PreviewInfo $entry
+        $info | Should Match ('^' + ('{0:N0}' -f 1234) + ' characters')
+        $info | Should Match 'with formatting'
+        $info | Should Match ('copied ' + $entry.Copied.ToString('HH:mm') + '$')
+    }
+
+    It 'describes an image: size in pixels and KB' {
+        Get-PreviewInfo (New-ImageEntry -Width 40 -Height 20) | Should Match "^Image 40 $([char]0xD7) 20 .+ KB "
+    }
+
+    It 'shows the full text with Windows line breaks' {
+        Get-PreviewText ([PsClip.ClipEntry]::new("one`ntwo`r`nthree")) | Should BeExactly "one`r`ntwo`r`nthree"
+    }
+
+    It 'cuts very long texts and says how much is missing' {
+        $script:MaxPreviewLength = 10
+        $text = Get-PreviewText ([PsClip.ClipEntry]::new('x' * 25))
+        $text | Should Match ('^x{10}\r\n\.\.\.  \(15 more characters\)$')
+        $script:MaxPreviewLength = 100000
+    }
+}
+
+Describe 'Update-StatusText' {
+    BeforeEach {
+        Reset-TestState
+        $script:Ui.Status = [System.Windows.Forms.Label]::new()
+        $Ui.Status.Font = [System.Drawing.Font]::new('Segoe UI', 8.5)
+    }
+
+    AfterEach { $Ui.Status.Dispose() }
+
+    It 'shows every hint when there is room' {
+        $Ui.Status.Width = 2000
+        Update-StatusText
+        $Ui.Status.Text | Should Match 'F3 preview.+Shift\+Del remove$'
+    }
+
+    It 'leaves out the last hints when the popup is narrow, but keeps the count' {
+        $Ui.Status.Width = 200
+        Update-StatusText
+        $Ui.Status.Text | Should Match '^0 of 0'
+        $Ui.Status.Text | Should Not Match 'Shift\+Del'
+        [System.Windows.Forms.TextRenderer]::MeasureText($Ui.Status.Text, $Ui.Status.Font).Width | Should Not BeGreaterThan 200
     }
 }
 
@@ -708,6 +763,12 @@ Describe 'Invoke-PopupKey' {
         Mock Move-Selection {}
         Mock Switch-SelectedPin {}
         Mock Remove-SelectedEntry {}
+        Mock Switch-Preview {}
+    }
+
+    It 'switches the preview with F3' {
+        Invoke-PopupKey (New-KeyEvent 'F3')
+        Assert-MockCalled Switch-Preview -Scope It -Exactly 1
     }
 
     It 'pastes with Enter (KeyCode Return) and closes with Esc' {

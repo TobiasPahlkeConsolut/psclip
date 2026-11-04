@@ -68,10 +68,12 @@ Describe 'Get-ShortcutArguments' {
     }
 
     It 'passes the settings on unchanged, also a hotkey ending in a backslash' {
-        $line = Get-ShortcutArguments @{ Hotkey = 'Ctrl+\'; Theme = 'Light'; MaxItems = 500; KeepAwake = [switch]$true }
+        $line = Get-ShortcutArguments @{
+            Hotkey = 'Ctrl+\'; Theme = 'Light'; MaxItems = 500; MaxImages = 0; Preview = [switch]$true; KeepAwake = [switch]$true
+        }
         $parsed = [ArgvParser]::Split('conhost.exe ' + $line)
         $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
-        $afterFile -join ' ' | Should BeExactly '-Hotkey Ctrl+\ -MaxItems 500 -Theme Light -KeepAwake'
+        $afterFile -join ' ' | Should BeExactly '-Hotkey Ctrl+\ -MaxItems 500 -MaxImages 0 -Theme Light -Preview -KeepAwake'
     }
 
     It 'leaves out settings that were not given' {

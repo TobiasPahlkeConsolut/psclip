@@ -32,6 +32,9 @@
 .PARAMETER Size
     Passed on to ClipboardManager.ps1: popup size S, M (default) or L.
 
+.PARAMETER Preview
+    Passed on to ClipboardManager.ps1: start with the preview (F3) shown.
+
 .PARAMETER KeepAwake
     Passed on to ClipboardManager.ps1: start with "Keep awake" switched on.
 
@@ -84,6 +87,9 @@ param(
     [Parameter(ParameterSetName = 'Install')]
     [ValidateSet('S', 'M', 'L')]
     [string]$Size,
+
+    [Parameter(ParameterSetName = 'Install')]
+    [switch]$Preview,
 
     [Parameter(ParameterSetName = 'Install')]
     [switch]$KeepAwake,
@@ -157,7 +163,9 @@ function Get-ShortcutArguments {
     foreach ($name in 'Hotkey', 'MaxItems', 'MaxImages', 'Theme', 'Size', 'KeepAwakeSeconds') {
         if ($Settings.Contains($name)) { $arguments += "-$name", [string]$Settings[$name] }
     }
-    if ($Settings.Contains('KeepAwake') -and [bool]$Settings['KeepAwake']) { $arguments += '-KeepAwake' }
+    foreach ($name in 'Preview', 'KeepAwake') {
+        if ($Settings.Contains($name) -and [bool]$Settings[$name]) { $arguments += "-$name" }
+    }
 
     ($arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
 }

@@ -13,6 +13,7 @@
         Up/Down, PgUp/PgDn    move the selection
         Enter, double-click   paste the entry into the window that was active, with formatting
         Shift+Enter           paste it as plain text
+        F3                    show / hide the preview of the selected entry (full text or image)
         Ctrl+P                pin / unpin the entry; pinned entries stay on top and are never
                               dropped by MaxItems or "Clear history"
         Shift+Delete          remove the entry
@@ -58,6 +59,9 @@
     Size of the history popup: S, M (default) or L - mostly its height. The popup opens at this
     size every time; resizing it by hand lasts until it closes. "Window size" in the tray menu
     changes it.
+
+.PARAMETER Preview
+    Start with the preview shown (F3 switches it).
 
 .PARAMETER KeepAwake
     Start with "Keep awake" switched on (it can be switched in the tray menu).
@@ -108,6 +112,8 @@ param(
 
     [ValidateSet('S', 'M', 'L')]
     [string]$Size = 'M',
+
+    [switch]$Preview,
 
     [switch]$KeepAwake,
 
@@ -168,6 +174,10 @@ $PopupSizes = @{
     M = [Size]::new(560, 360)
     L = [Size]::new(620, 540)
 }
+
+# Height of the preview (F3) at 100 % display scaling; the popup grows by it
+$PreviewHeight = 220
+$MaxPreviewLength = 100000   # characters shown in the preview
 
 # Images larger than this are not recorded
 $MaxImageBytes = 50MB            # PNG offered on the clipboard
@@ -728,6 +738,7 @@ function Show-Popup {
     }
 
     Set-Theme (Test-DarkTheme)
+    $Ui.Preview.Visible = $State.PreviewVisible
     Reset-PopupSize
     if ($Ui.Search.Text) {
         $Ui.Search.Text = ''   # TextChanged refreshes the list
@@ -751,11 +762,90 @@ function Show-Popup {
 }
 
 function Reset-PopupSize {
-    # The popup always opens at the configured size; resizing it by hand lasts until it closes.
+    # The popup always opens at the configured size (plus the preview, if shown); resizing it by
+    # hand lasts until it closes.
     $logicalSize = $PopupSizes[$State.PopupSize]
-    $Ui.Form.ClientSize = [Size]::new(
-        [int]($logicalSize.Width * $Ui.Scale),
-        [int]($logicalSize.Height * $Ui.Scale))
+    $height = [int]($logicalSize.Height * $Ui.Scale)
+    if ($State.PreviewVisible) { $height += $Ui.Preview.Height }
+    $Ui.Form.ClientSize = [Size]::new([int]($logicalSize.Width * $Ui.Scale), $height)
+}
+
+function Move-PopupIntoScreen {
+    # Keeps the popup on the screen it is on, e.g. after it grew for the preview.
+    $form = $Ui.Form
+    $area = [Screen]::FromControl($form).WorkingArea
+    $x = [Math]::Max($area.Left, [Math]::Min($form.Left, $area.Right - $form.Width))
+    $y = [Math]::Max($area.Top, [Math]::Min($form.Top, $area.Bottom - $form.Height))
+    $form.Location = [Point]::new($x, $y)
+}
+
+function Switch-Preview {
+    # F3: shows or hides the preview below the list; the popup grows or shrinks by its height.
+    $State.PreviewVisible = -not $State.PreviewVisible
+    $Ui.Preview.Visible = $State.PreviewVisible
+    $delta = if ($State.PreviewVisible) { $Ui.Preview.Height } else { -$Ui.Preview.Height }
+    $Ui.Form.Height += $delta
+    Move-PopupIntoScreen
+    Update-Preview
+}
+
+function Update-Preview {
+    # Shows the selected entry in the preview: its full text, or the image.
+    if (-not $State.PreviewVisible) { return }
+
+    Clear-Preview
+    $entry = Get-SelectedEntry
+    if ($null -eq $entry) { return }
+
+    $Ui.PreviewInfo.Text = Get-PreviewInfo $entry
+    if ($entry.IsImage) {
+        $Ui.PreviewImage.Image = $entry.ToBitmap()
+        $Ui.PreviewImage.Visible = $true
+        $Ui.PreviewText.Visible = $false
+    }
+    else {
+        $Ui.PreviewText.Text = Get-PreviewText $entry
+        $Ui.PreviewText.Visible = $true
+        $Ui.PreviewImage.Visible = $false
+    }
+}
+
+function Clear-Preview {
+    $Ui.PreviewInfo.Text = ''
+    $Ui.PreviewText.Text = ''
+    $image = $Ui.PreviewImage.Image
+    $Ui.PreviewImage.Image = $null
+    if ($null -ne $image) { $image.Dispose() }
+}
+
+function Get-PreviewInfo {
+    # The line above the preview, e.g. "1.234 characters, with formatting  -  copied 10:42".
+    param([PsClip.ClipEntry]$Entry)
+
+    $parts = @()
+    if ($Entry.IsImage) {
+        $parts += "Image $($Entry.Width) $([char]0xD7) $($Entry.Height)"
+        $parts += '{0:N0} KB' -f [Math]::Ceiling($Entry.Png.Length / 1KB)
+    }
+    else {
+        $parts += '{0:N0} characters' -f $Entry.Text.Length
+        if ($Entry.HasFormatting) { $parts += 'with formatting' }
+    }
+    $format = if ($Entry.Copied.Date -eq [DateTime]::Today) { 'HH:mm' } else { 'dd.MM. HH:mm' }
+    $parts += "copied $($Entry.Copied.ToString($format))"
+    $parts -join "  $([char]0xB7)  "
+}
+
+function Get-PreviewText {
+    # The full text for the preview, with Windows line breaks and cut at MaxPreviewLength.
+    param([PsClip.ClipEntry]$Entry)
+
+    $text = $Entry.Text
+    $more = $text.Length - $MaxPreviewLength
+    if ($more -gt 0) { $text = $text.Substring(0, $MaxPreviewLength) }
+    $text = $text -replace '\r?\n', "`r`n"
+    if ($more -gt 0) { $text += "`r`n...  ({0:N0} more characters)" -f $more }
+    $text
 }
 
 function Show-PopupLater {
@@ -766,8 +856,10 @@ function Show-PopupLater {
 function Hide-Popup {
     if ($Ui.Form.Visible) { $Ui.Form.Hide() }
 
-    # Do not leave previews of the history in the hidden list: other programs could read them.
+    # Do not leave previews of the history in the hidden list and preview: other programs could
+    # read them.
     $Ui.List.Items.Clear()
+    Clear-Preview
     $State.Filtered = [List[PsClip.ClipEntry]]::new()
     $State.FilteredPinnedCount = 0
 }
@@ -815,15 +907,30 @@ function Update-PopupList {
         }
     }
 
+    Update-StatusText
+    Update-Preview
+}
+
+function Update-StatusText {
+    # Count and key hints below the list; the less important hints are left out when the popup is
+    # too narrow for all of them.
     $action = if ($State.PasteTarget -ne [IntPtr]::Zero) { 'paste' } else { 'copy' }
     $total = $State.Pinned.Count + $State.History.Count
-    $Ui.Status.Text = @(
-        "$($found.Count) of $total"
-        "Enter $action"
-        'Shift+Enter plain text'
-        'Ctrl+P pin'
-        'Shift+Del remove'
-    ) -join "  $([char]0xB7)  "
+    $parts = [List[string]]::new()
+    foreach ($part in "$($State.Filtered.Count) of $total", "Enter $action", 'Shift+Enter plain',
+        'F3 preview', 'Ctrl+P pin', 'Shift+Del remove') {
+        $parts.Add($part)
+    }
+
+    $separator = "  $([char]0xB7)  "
+    $status = $Ui.Status
+    $available = $status.ClientSize.Width - $status.Padding.Horizontal
+    $text = $parts -join $separator
+    while ($parts.Count -gt 1 -and [TextRenderer]::MeasureText($text, $status.Font).Width -gt $available) {
+        $parts.RemoveAt($parts.Count - 1)
+        $text = $parts -join $separator
+    }
+    $status.Text = $text
 }
 
 function Test-FilterMatch {
@@ -961,6 +1068,7 @@ function Invoke-PopupKey {
         ([Keys]::Up) { Move-Selection -1 }
         ([Keys]::PageDown) { Move-Selection $page }
         ([Keys]::PageUp) { Move-Selection (-$page) }
+        ([Keys]::F3) { Switch-Preview }
         ([Keys]::P) {
             if ($KeyEvent.Control) { Switch-SelectedPin } else { $handled = $false }
         }
@@ -1060,8 +1168,14 @@ function Set-Theme {
     $Ui.List.ForeColor = $colors.Text
     $Ui.Status.BackColor = $colors.Back
     $Ui.Status.ForeColor = $colors.Muted
+    $Ui.Preview.BackColor = $colors.Input
+    $Ui.PreviewInfo.ForeColor = $colors.Muted
+    $Ui.PreviewText.BackColor = $colors.Input
+    $Ui.PreviewText.ForeColor = $colors.Text
+    $Ui.PreviewImage.BackColor = $colors.Input
     [PsClip.Native]::SetDarkTitleBar($Ui.Form.Handle, $Dark)
     [PsClip.Native]::SetDarkControlTheme($Ui.List.Handle, $Dark)
+    [PsClip.Native]::SetDarkControlTheme($Ui.PreviewText.Handle, $Dark)
 
     # Submenus are separate drop-downs and need their own renderer.
     foreach ($menu in $Ui.TrayMenu, $Ui.SizeMenuItem.DropDown, $Ui.ListMenu) {
@@ -1188,9 +1302,42 @@ function New-PopupWindow {
     $status.TextAlign = 'MiddleLeft'
     $status.Padding = [Padding]::new([int](4 * $scale), 0, 0, 0)
 
+    # Preview (F3) between list and status line: an info line, then the text or the image
+    $preview = [Panel]::new()
+    $preview.Dock = 'Bottom'
+    $preview.Height = [int]($PreviewHeight * $scale)
+    $preview.Padding = [Padding]::new($Ui.PinColumn, [int]($Ui.Padding / 2), $Ui.Padding, $Ui.Padding)
+    $preview.Visible = $State.PreviewVisible
+
+    $previewInfo = [Label]::new()
+    $previewInfo.Dock = 'Top'
+    $previewInfo.AutoSize = $false
+    $previewInfo.Font = $Ui.SmallFont
+    $previewInfo.Height = [int]($Ui.SmallFont.Height * 1.7)
+    $previewInfo.TextAlign = 'MiddleLeft'
+
+    $previewText = [TextBox]::new()
+    $previewText.Dock = 'Fill'
+    $previewText.Multiline = $true
+    $previewText.ReadOnly = $true
+    $previewText.WordWrap = $true
+    $previewText.ScrollBars = 'Vertical'
+    $previewText.BorderStyle = 'None'
+    $previewText.TabStop = $false
+
+    $previewImage = [PictureBox]::new()
+    $previewImage.Dock = 'Fill'
+    $previewImage.SizeMode = 'Zoom'
+    $previewImage.Visible = $false
+
+    $preview.Controls.Add($previewText)    # Fill controls first (docking runs in reverse order)
+    $preview.Controls.Add($previewImage)
+    $preview.Controls.Add($previewInfo)
+
     # Docking is applied in reverse order: the Fill control has to be added first.
     $form.Controls.Add($list)
     $form.Controls.Add($searchPanel)
+    $form.Controls.Add($preview)
     $form.Controls.Add($status)
 
     $Ui.Form = $form
@@ -1198,6 +1345,10 @@ function New-PopupWindow {
     $Ui.SearchPanel = $searchPanel
     $Ui.List = $list
     $Ui.Status = $status
+    $Ui.Preview = $preview
+    $Ui.PreviewInfo = $previewInfo
+    $Ui.PreviewText = $previewText
+    $Ui.PreviewImage = $previewImage
     Reset-PopupSize
 
     [void]$form.Handle   # create the window now so that BeginInvoke works before the first Show
@@ -1205,6 +1356,9 @@ function New-PopupWindow {
 
     # Event handlers run after this function has returned: use $Ui / $State, not local variables.
     $search.add_TextChanged({ Update-PopupList })
+    $list.add_SelectedIndexChanged({ Update-Preview })
+    $form.add_Resize({ if ($Ui.Form.Visible) { Update-StatusText } })
+    $previewText.add_MouseUp({ [void]$Ui.Search.Focus() })   # scrolling the preview, typing still filters
     $list.add_DrawItem({
         param($source, $e)
         Write-ListItem $e
@@ -1264,6 +1418,14 @@ function New-ListMenu {
         [void]$Ui.Search.Focus()
     })
 
+    [void]$menu.Items.Add([ToolStripSeparator]::new())
+    $Ui.ListMenuPreview = $menu.Items.Add('Preview')
+    $Ui.ListMenuPreview.ShortcutKeyDisplayString = 'F3'
+    $Ui.ListMenuPreview.add_Click({
+        Switch-Preview
+        [void]$Ui.Search.Focus()
+    })
+
     $menu.add_Opening({
         param($source, $e)
         $entry = Get-SelectedEntry
@@ -1276,6 +1438,7 @@ function New-ListMenu {
         $Ui.ListMenuPlain.Text = "$verb as plain text"
         $Ui.ListMenuPlain.Visible = $entry.HasFormatting   # same as the normal paste otherwise
         $Ui.ListMenuPin.Text = if ($State.Pinned.Contains($entry)) { 'Unpin' } else { 'Pin to top' }
+        $Ui.ListMenuPreview.Checked = $State.PreviewVisible
     })
 
     $Ui.ListMenu = $menu
@@ -1419,6 +1582,7 @@ $State = @{
     HotkeyActive         = $false
     ThemeSetting         = $Theme                # Dark, Light or Auto; the tray menu switches it
     PopupSize            = $Size                 # S, M or L; the tray menu changes it
+    PreviewVisible       = $Preview.IsPresent    # F3 switches it
     KeepAwake            = $false                # the tray menu switches it
     IsDark               = $null
     Colors               = $null

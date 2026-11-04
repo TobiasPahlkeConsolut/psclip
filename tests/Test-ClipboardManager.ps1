@@ -182,6 +182,39 @@ public static class TestNative
         return found;
     }
 
+    [DllImport("user32.dll")] static extern int GetWindowLong(IntPtr hwnd, int index);
+
+    // The (first) edit control that is - or is not - read-only: the filter box vs. the preview.
+    public static IntPtr EditBox(IntPtr parent, bool readOnly)
+    {
+        IntPtr found = IntPtr.Zero;
+        EnumChildWindows(parent, delegate (IntPtr hwnd, IntPtr unused)
+        {
+            StringBuilder name = new StringBuilder(256);
+            GetClassName(hwnd, name, name.Capacity);
+            if (name.ToString().IndexOf("EDIT", StringComparison.OrdinalIgnoreCase) < 0) return true;
+            bool isReadOnly = (GetWindowLong(hwnd, -16 /* GWL_STYLE */) & 0x0800 /* ES_READONLY */) != 0;
+            if (isReadOnly != readOnly) return true;
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    // Texts of all child windows whose class contains classPart (e.g. the labels: "STATIC").
+    public static List<string> ChildTexts(IntPtr parent, string classPart)
+    {
+        List<string> texts = new List<string>();
+        EnumChildWindows(parent, delegate (IntPtr hwnd, IntPtr unused)
+        {
+            StringBuilder name = new StringBuilder(256);
+            GetClassName(hwnd, name, name.Capacity);
+            if (name.ToString().IndexOf(classPart, StringComparison.OrdinalIgnoreCase) >= 0) texts.Add(TextOf(hwnd));
+            return true;
+        }, IntPtr.Zero);
+        return texts;
+    }
+
     public static string[] ListBoxItems(IntPtr listBox)
     {
         int count = (int)SendMessage(listBox, LB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);
@@ -520,8 +553,8 @@ try {
 
     $listBox = [TestNative]::ChildByClass($popup, 'LISTBOX')
     # By class, not by asking for the focus: right after the popup appears, the focus may still
-    # be on the list for a moment.
-    $searchBox = [TestNative]::ChildByClass($popup, 'EDIT')
+    # be on the list for a moment. The filter box is the edit control that is not read-only.
+    $searchBox = [TestNative]::EditBox($popup, $false)
     $expected = "psclip test: alpha|psclip test: gamma & <special> chars|" +
         "psclip test: beta line one $([char]0x21B5) line two|psclip test: initial entry"
     $items = [TestNative]::ListBoxItems($listBox) -join '|'
@@ -621,6 +654,35 @@ try {
     Add-Result 'A copied image is listed with its size' ($imageItem -like 'Image 400 * 100') $imageItem
     Add-Result 'The filter "image" finds it' $imageFound
     Add-Result 'Enter pastes the image' $imagePasted
+
+    # --- preview (F3): full text or image of the selected entry; the popup grows by it ---
+    $keyF3 = 0x72
+    $heightBefore = $heightWith = $heightAfter = -1
+    $previewText = $imageInfo = ''
+    if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
+        $heightBefore = [TestNative]::ClientHeightOf($popup)
+        Send-PostedKey $searchBox $keyF3
+        Wait-Milliseconds 400
+        $heightWith = [TestNative]::ClientHeightOf($popup)
+        $previewText = [TestNative]::TextOf([TestNative]::EditBox($popup, $true))   # the pinned entry
+        Save-WindowImage $popup "popup-preview-$Theme.png"
+
+        Send-PostedKey $searchBox $keyDown   # the image, pasted last
+        Wait-Milliseconds 400
+        $imageInfo = [TestNative]::ChildTexts($popup, 'STATIC') | Where-Object { $_ -like 'Image *' } | Select-Object -First 1
+        Save-WindowImage $popup "popup-preview-image-$Theme.png"
+
+        Send-PostedKey $searchBox $keyF3
+        Wait-Milliseconds 400
+        $heightAfter = [TestNative]::ClientHeightOf($popup)
+        Hide-TestPopup
+    }
+    Add-Result 'F3 shows the preview, the popup grows' ($heightWith -gt $heightBefore -and $heightBefore -gt 0) `
+        "height $heightBefore -> $heightWith"
+    Add-Result 'The preview shows the full text' ($previewText -ceq "psclip test: beta line one`r`nline two") `
+        ($previewText -replace "`r`n", ' | ')
+    Add-Result 'The preview describes an image' ($imageInfo -like 'Image 400 * 100 *') "$imageInfo"
+    Add-Result 'F3 hides the preview again' ($heightAfter -eq $heightBefore) "height $heightAfter"
 
     # --- popup size: medium by default, manual resizing is reset on the next opening ---
     $mediumHeight = [int](360 * $scale)
