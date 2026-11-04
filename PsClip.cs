@@ -95,6 +95,37 @@ namespace PsClip
         }
     }
 
+    // One history entry: the plain text plus the formatting it was copied with.
+    public sealed class ClipEntry
+    {
+        public string Text;
+        public string Html;   // "HTML Format" (CF_HTML), or null
+        public string Rtf;    // Rich Text Format, or null
+        public DateTime Copied;
+
+        public ClipEntry(string text)
+        {
+            Text = text;
+            Copied = DateTime.Now;
+        }
+
+        public bool HasFormatting
+        {
+            get { return Html != null || Rtf != null; }
+        }
+
+        // The same entry for the history: equal text. The formatting may differ - the newer copy wins.
+        public bool SameContent(ClipEntry other)
+        {
+            return other != null && string.Equals(Text, other.Text, StringComparison.Ordinal);
+        }
+
+        public override string ToString()
+        {
+            return Text;
+        }
+    }
+
     // Context menu colors (the default renderer ignores BackColor for most parts).
     public sealed class MenuColors : ProfessionalColorTable
     {
@@ -172,6 +203,7 @@ namespace PsClip
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint MapVirtualKey(uint code, uint mapType);
         [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extraInfo);
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);
+        [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
         [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr handle);
         [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr handle);
@@ -214,6 +246,22 @@ namespace PsClip
 
         [DllImport("user32.dll", SetLastError = true)]
         static extern uint SendInput(uint count, Input[] inputs, int size);
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct Msg
+        {
+            public IntPtr Hwnd;
+            public uint Message;
+            public IntPtr WParam, LParam;
+            public uint Time;
+            public int X, Y;
+        }
+
+        [DllImport("user32.dll")]
+        static extern bool PeekMessage(out Msg msg, IntPtr hwnd, uint filterMin, uint filterMax, uint remove);
+
+        [DllImport("user32.dll")]
+        static extern uint MsgWaitForMultipleObjects(uint count, IntPtr[] handles, bool waitAll, uint milliseconds, uint wakeMask);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, string lParam);
@@ -325,28 +373,86 @@ namespace PsClip
             }
         }
 
-        // SetForegroundWindow is often refused for background processes; attaching to the
-        // input queue of the current foreground thread lifts that restriction.
+        // Brings a window to the foreground. Tries the plain way first, which works whenever this
+        // process may set the foreground window: it is in front, or it just received the hotkey or
+        // a tray icon click. Only if that is refused, it attaches to the input queue of the
+        // foreground thread - a fallback, because attaching can confuse that thread's keyboard
+        // focus (seen with rich text boxes): the window then refuses to be activated again later.
+        public static string LastActivation;   // "already", "plain", "attached" or "failed" - for the log
+
         public static bool ForceForeground(IntPtr hwnd)
         {
-            IntPtr current = GetForegroundWindow();
-            if (current == hwnd) return true;
+            LastActivation = "failed";
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                if (GetForegroundWindow() == hwnd)
+                {
+                    LastActivation = attempt == 0 ? "already" : "attached";
+                    return true;
+                }
 
-            uint unused;
-            uint foregroundThread = GetWindowThreadProcessId(current, out unused);
-            uint thisThread = GetCurrentThreadId();
-            bool attached = foregroundThread != 0 && foregroundThread != thisThread
-                            && AttachThreadInput(thisThread, foregroundThread, true);
-            try
-            {
                 BringWindowToTop(hwnd);
-                SetForegroundWindow(hwnd);
+                if (SetForegroundWindow(hwnd) && WaitForForeground(hwnd, 100))
+                {
+                    LastActivation = "plain";
+                    return true;
+                }
+
+                // Attach to the foreground thread - or, if Windows has no foreground window at the
+                // moment (an activation got stuck), to the target window's thread.
+                IntPtr current = GetForegroundWindow();
+                uint unused;
+                uint otherThread = GetWindowThreadProcessId(current != IntPtr.Zero ? current : hwnd, out unused);
+                uint thisThread = GetCurrentThreadId();
+                bool attached = otherThread != 0 && otherThread != thisThread
+                                && AttachThreadInput(thisThread, otherThread, true);
+                try
+                {
+                    BringWindowToTop(hwnd);
+                    SetForegroundWindow(hwnd);
+                }
+                finally
+                {
+                    if (attached) AttachThreadInput(thisThread, otherThread, false);
+                }
+                if (WaitForForeground(hwnd, 100))
+                {
+                    LastActivation = "attached";
+                    return true;
+                }
             }
-            finally
+            return false;
+        }
+
+        // Activation can complete a moment later (GetForegroundWindow returns null meanwhile).
+        static bool WaitForForeground(IntPtr hwnd, int milliseconds)
+        {
+            int end = Environment.TickCount + milliseconds;
+            while (GetForegroundWindow() != hwnd)
             {
-                if (attached) AttachThreadInput(thisThread, foregroundThread, false);
+                if (Environment.TickCount - end >= 0) return false;
+                Wait(10);
             }
-            return GetForegroundWindow() == hwnd;
+            return true;
+        }
+
+        // Waits, but keeps answering messages that other threads send to this one. Activating a
+        // window of another program can depend on that: a rich text box there (Outlook, Word, ...)
+        // coordinates its keyboard focus with the thread that had it before - this one. Posted
+        // messages (input, timers, hotkeys) are not processed, so nothing in the app runs meanwhile.
+        public static void Wait(int milliseconds)
+        {
+            const uint QS_SENDMESSAGE = 0x0040;
+            const uint PM_NOREMOVE_QS_SENDMESSAGE = 0x00400000;
+            int end = Environment.TickCount + milliseconds;
+            int left = milliseconds;
+            while (left > 0)
+            {
+                MsgWaitForMultipleObjects(0, null, false, (uint)left, QS_SENDMESSAGE);
+                Msg msg;
+                PeekMessage(out msg, IntPtr.Zero, 0, 0, PM_NOREMOVE_QS_SENDMESSAGE);   // handles sent messages
+                left = end - Environment.TickCount;
+            }
         }
 
         // Sends Ctrl+V to the target window. Waits (max. 1 s) until the user has released Shift,
@@ -357,7 +463,7 @@ namespace PsClip
         public static bool PasteInto(IntPtr target)
         {
             int[] keys = { 0x10, 0x11, 0x12, 0x5B, 0x5C, 0x0D };   // Shift, Ctrl, Alt, LWin, RWin, Enter
-            for (int i = 0; i < 100 && AnyKeyDown(keys); i++) Thread.Sleep(10);
+            for (int i = 0; i < 100 && AnyKeyDown(keys); i++) Wait(10);
             if (AnyKeyDown(keys) || GetForegroundWindow() != target) return false;
 
             Input[] inputs =

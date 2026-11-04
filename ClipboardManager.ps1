@@ -1,17 +1,18 @@
 <#
 .SYNOPSIS
-    Minimal clipboard history manager for Windows - in memory only, plain text only.
+    Minimal clipboard history manager for Windows - in memory only.
 
 .DESCRIPTION
-    Records every text that is copied to the clipboard and keeps the most recent entries in
-    memory. Nothing is ever written to disk: the history (pinned entries included) is gone
-    when the script exits.
+    Records every text that is copied to the clipboard - with its formatting (HTML, RTF) - and
+    keeps the most recent entries in memory. Nothing is ever written to disk: the history
+    (pinned entries included) is gone when the script exits.
 
     Press the hotkey (see -Hotkey) to open the history next to the mouse cursor:
 
         type to filter        every word must match, case-insensitive
         Up/Down, PgUp/PgDn    move the selection
-        Enter, double-click   paste the entry into the window that was active
+        Enter, double-click   paste the entry into the window that was active, with formatting
+        Shift+Enter           paste it as plain text
         Ctrl+P                pin / unpin the entry; pinned entries stay on top and are never
                               dropped by MaxItems or "Clear history"
         Shift+Delete          remove the entry
@@ -477,8 +478,9 @@ function New-FlatButton {
 
 #region Clipboard and history
 
-function Read-ClipboardText {
-    # Returns the clipboard text, or $null if there is none or the source app marked it as private.
+function Read-ClipboardEntry {
+    # The clipboard as a history entry - text plus HTML/RTF formatting - or $null if there is no
+    # text or the source app marked the content as private.
     param($Data = [Clipboard]::GetDataObject())
 
     if ($null -eq $Data) { return $null }
@@ -497,21 +499,34 @@ function Read-ClipboardText {
     }
     if (-not $Data.GetDataPresent([DataFormats]::UnicodeText)) { return $null }
 
-    return [string]$Data.GetData([DataFormats]::UnicodeText)
+    $entry = [PsClip.ClipEntry]::new([string]$Data.GetData([DataFormats]::UnicodeText))
+    # WinForms reads HTML and RTF as plain strings (no deserialization). Formatting larger than
+    # MaxEntryLength is dropped; the text is kept.
+    foreach ($format in 'Html', 'Rtf') {
+        $formatName = [DataFormats]::$format
+        if (-not $Data.GetDataPresent($formatName, $false)) { continue }
+        $value = $Data.GetData($formatName, $false) -as [string]
+        if ($value -and $value.Length -le $MaxEntryLength) { $entry.$format = $value }
+    }
+    $entry
 }
 
 function Receive-ClipboardChange {
+    # The clipboard change caused by pasting an entry is not recorded again: the entry is already
+    # in the history, and a plain-text paste must not replace its formatting.
+    if ([PsClip.Native]::GetClipboardSequenceNumber() -eq $State.OwnClipboardSequence) { return }
+
     try {
-        $text = Read-ClipboardText
+        $entry = Read-ClipboardEntry
     }
     catch {
         Write-Verbose "Could not read the clipboard: $($_.Exception.Message)"
         return
     }
-    if ($null -eq $text) { return }
+    if ($null -eq $entry) { return }
 
     $selected = Get-SelectedEntry
-    Add-ClipboardEntry $text
+    Add-ClipboardEntry $entry
     Update-TrayText
     if ($Ui.Form.Visible) {
         # Keep the same entry selected, not the same row: the new entry shifts the list.
@@ -520,41 +535,87 @@ function Receive-ClipboardChange {
 }
 
 function Add-ClipboardEntry {
-    param([string]$Text)
+    param([PsClip.ClipEntry]$Entry)
 
-    if ([string]::IsNullOrWhiteSpace($Text)) { return }
-    if ($Text.Length -gt $MaxEntryLength) {
-        Write-Verbose "Skipped entry with $($Text.Length) chars (MaxEntryLength $MaxEntryLength)."
+    if ($null -eq $Entry -or [string]::IsNullOrWhiteSpace($Entry.Text)) { return }
+    if ($Entry.Text.Length -gt $MaxEntryLength) {
+        Write-Verbose "Skipped entry with $($Entry.Text.Length) chars (MaxEntryLength $MaxEntryLength)."
         return
     }
-    if ($State.Pinned.Contains($Text)) { return }   # pinned entries keep their place
 
-    [void]$State.History.Remove($Text)              # a re-copied entry moves to the top
-    $State.History.Insert(0, $Text)
+    # A re-copied entry replaces the old one (the newer formatting wins): pinned entries keep
+    # their place, others move to the top.
+    $pinnedIndex = Find-ClipboardEntry $State.Pinned $Entry
+    if ($pinnedIndex -ge 0) {
+        $State.Pinned[$pinnedIndex] = $Entry
+        return
+    }
+    $index = Find-ClipboardEntry $State.History $Entry
+    if ($index -ge 0) { $State.History.RemoveAt($index) }
+    $State.History.Insert(0, $Entry)
     Limit-ClipboardHistory
-    Write-Verbose "Recorded entry ($($Text.Length) chars); $($State.History.Count) entries in history."
+
+    $formats = if ($Entry.HasFormatting) { ' with formatting' } else { '' }
+    Write-Verbose "Recorded entry ($($Entry.Text.Length) chars$formats); $($State.History.Count) entries in history."
+}
+
+function Find-ClipboardEntry {
+    # Index of the entry with the same content in the list, or -1.
+    param($List, [PsClip.ClipEntry]$Entry)
+
+    for ($i = 0; $i -lt $List.Count; $i++) {
+        if ($List[$i].SameContent($Entry)) { return $i }
+    }
+    return -1
 }
 
 function Remove-ClipboardEntry {
-    param([string]$Text)
+    param([PsClip.ClipEntry]$Entry)
 
-    if (-not $State.Pinned.Remove($Text)) {
-        [void]$State.History.Remove($Text)
+    if (-not $State.Pinned.Remove($Entry)) {
+        [void]$State.History.Remove($Entry)
     }
 }
 
 function Switch-ClipboardPin {
     # Pinning appends the entry to the pinned group; unpinning moves it to the top of the history.
-    param([string]$Text)
+    param([PsClip.ClipEntry]$Entry)
 
-    if ($State.Pinned.Remove($Text)) {
-        $State.History.Insert(0, $Text)
+    if ($State.Pinned.Remove($Entry)) {
+        $State.History.Insert(0, $Entry)
         Limit-ClipboardHistory
     }
     else {
-        [void]$State.History.Remove($Text)
-        $State.Pinned.Add($Text)
+        [void]$State.History.Remove($Entry)
+        $State.Pinned.Add($Entry)
     }
+}
+
+function Move-ClipboardEntryToTop {
+    # After pasting an entry: like copying it again, but keeping the entry and its formatting.
+    param([PsClip.ClipEntry]$Entry)
+
+    if ($State.History.Remove($Entry)) { $State.History.Insert(0, $Entry) }
+}
+
+function New-ClipboardData {
+    # Clipboard content for an entry: the text, plus its formatting unless -PlainText.
+    param([PsClip.ClipEntry]$Entry, [switch]$PlainText)
+
+    $data = [DataObject]::new()
+    $data.SetText($Entry.Text, [TextDataFormat]::UnicodeText)
+    if (-not $PlainText) {
+        if ($Entry.Html) { $data.SetData([DataFormats]::Html, $Entry.Html) }
+        if ($Entry.Rtf) { $data.SetData([DataFormats]::Rtf, $Entry.Rtf) }
+    }
+    $data
+}
+
+function Set-ClipboardEntry {
+    param([PsClip.ClipEntry]$Entry, [switch]$PlainText)
+
+    [Clipboard]::SetDataObject((New-ClipboardData $Entry -PlainText:$PlainText), $true, 10, 100)
+    $State.OwnClipboardSequence = [PsClip.Native]::GetClipboardSequenceNumber()
 }
 
 function Limit-ClipboardHistory {
@@ -581,9 +642,11 @@ function Show-Popup {
     $State.PasteTarget = [IntPtr]::Zero
     if ($PasteIntoActiveWindow) {
         $active = [PsClip.Native]::GetForegroundWindow()
-        if ($active -ne [IntPtr]::Zero -and [PsClip.Native]::GetWindowProcessId($active) -ne $PID) {
+        $activeProcess = [PsClip.Native]::GetWindowProcessId($active)
+        if ($active -ne [IntPtr]::Zero -and $activeProcess -ne $PID) {
             $State.PasteTarget = $active
         }
+        Write-Verbose "Popup opened; paste target: window of process $activeProcess."
     }
 
     Set-Theme (Test-DarkTheme)
@@ -604,6 +667,7 @@ function Show-Popup {
 
     $form.Show()
     [void][PsClip.Native]::ForceForeground($form.Handle)
+    Write-Verbose "Popup in front: $([PsClip.Native]::LastActivation)."
     $form.Activate()
     [void]$Ui.Search.Focus()
 }
@@ -626,7 +690,7 @@ function Hide-Popup {
 
     # Do not leave previews of the history in the hidden list: other programs could read them.
     $Ui.List.Items.Clear()
-    $State.Filtered = [List[string]]::new()
+    $State.Filtered = [List[PsClip.ClipEntry]]::new()
     $State.FilteredPinnedCount = 0
 }
 
@@ -645,13 +709,13 @@ function Update-PopupList {
     param([int]$SelectIndex = 0, $SelectEntry = $null)
 
     $terms = $Ui.Search.Text.Split([char[]]@(' ', "`t"), [StringSplitOptions]::RemoveEmptyEntries)
-    $found = [List[string]]::new()
+    $found = [List[PsClip.ClipEntry]]::new()
     foreach ($entry in $State.Pinned) {
-        if (Test-FilterMatch $entry $terms) { $found.Add($entry) }
+        if (Test-FilterMatch $entry.Text $terms) { $found.Add($entry) }
     }
     $pinnedCount = $found.Count
     foreach ($entry in $State.History) {
-        if (Test-FilterMatch $entry $terms) { $found.Add($entry) }
+        if (Test-FilterMatch $entry.Text $terms) { $found.Add($entry) }
     }
     $State.Filtered = $found
     $State.FilteredPinnedCount = $pinnedCount
@@ -660,11 +724,11 @@ function Update-PopupList {
     $list.BeginUpdate()
     $list.Items.Clear()
     foreach ($entry in $found) {
-        [void]$list.Items.Add((Format-Preview $entry))
+        [void]$list.Items.Add((Format-Preview $entry.Text))
     }
     $list.EndUpdate()
     if ($found.Count -gt 0) {
-        $entryIndex = if ($null -ne $SelectEntry) { $found.IndexOf($SelectEntry) } else { -1 }
+        $entryIndex = if ($null -ne $SelectEntry) { Find-ClipboardEntry $found $SelectEntry } else { -1 }
         $list.SelectedIndex = if ($entryIndex -ge 0) {
             $entryIndex
         }
@@ -678,18 +742,18 @@ function Update-PopupList {
     $Ui.Status.Text = @(
         "$($found.Count) of $total"
         "Enter $action"
+        'Shift+Enter plain text'
         'Ctrl+P pin'
         'Shift+Del remove'
-        'Esc close'
-    ) -join "   $([char]0xB7)   "
+    ) -join "  $([char]0xB7)  "
 }
 
 function Test-FilterMatch {
-    # True if the entry contains every term (case-insensitive).
-    param([string]$Entry, [string[]]$Terms)
+    # True if the text contains every term (case-insensitive).
+    param([string]$Text, [string[]]$Terms)
 
     foreach ($term in $Terms) {
-        if ($Entry.IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
+        if ($Text.IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
     }
     return $true
 }
@@ -722,31 +786,48 @@ function Get-SelectedEntry {
 }
 
 function Invoke-SelectedEntry {
-    # Puts the selected entry on the clipboard and pastes it into the previously active window.
-    $text = Get-SelectedEntry
-    if ($null -eq $text) { return }
+    # Puts the selected entry on the clipboard - with its formatting unless -PlainText - and
+    # pastes it into the previously active window.
+    param([switch]$PlainText)
+
+    $entry = Get-SelectedEntry
+    if ($null -eq $entry) { return }
 
     $target = $State.PasteTarget
-    Hide-Popup
     try {
-        [Clipboard]::SetText($text)
+        Set-ClipboardEntry $entry -PlainText:$PlainText
     }
     catch {
+        Hide-Popup
         $Ui.Tray.ShowBalloonTip(5000, 'Clipboard history',
             "Could not write to the clipboard: $($_.Exception.Message)", 'Warning')
         return
     }
+    Move-ClipboardEntryToTop $entry
 
-    if ($target -eq [IntPtr]::Zero) { return }   # copy mode
+    if ($target -eq [IntPtr]::Zero) {
+        Hide-Popup   # copy mode
+        return
+    }
 
-    # Only send Ctrl+V if the original window is really back in front - never into another one.
-    # PasteInto checks that again right before sending.
+    # Bring the original window back while the popup is still open: hiding the popup first lets
+    # Windows activate some other window in between. Only send Ctrl+V if the original window is
+    # really in front - never into another one; PasteInto checks that again right before sending.
     $pasted = $false
-    if ([PsClip.Native]::IsWindow($target) -and [PsClip.Native]::ForceForeground($target)) {
-        Start-Sleep -Milliseconds 50
+    $inFront = [PsClip.Native]::IsWindow($target) -and [PsClip.Native]::ForceForeground($target)
+    if ($inFront) {
+        Hide-Popup
+        [PsClip.Native]::Wait(50)   # let the window settle; not Start-Sleep (see Native.Wait)
         $pasted = [PsClip.Native]::PasteInto($target)
     }
-    Write-Verbose "Paste into the previous window: $(if ($pasted) { 'sent Ctrl+V' } else { 'not sent' })."
+    Hide-Popup
+    $outcome = if ($pasted) { 'sent Ctrl+V' }
+        elseif (-not $inFront) {
+            $front = [PsClip.Native]::GetWindowProcessId([PsClip.Native]::GetForegroundWindow())
+            "not sent, it could not be brought to the front (in front: window of process $front, psclip is $PID)"
+        }
+        else { 'not sent, keys were held down or another window came to the front' }
+    Write-Verbose "Paste into the previous window: $outcome."
     if (-not $pasted) {
         $Ui.Tray.ShowBalloonTip(4000, 'Clipboard history',
             'Not pasted - the target window was not in front. The entry is on the clipboard: press Ctrl+V.', 'Info')
@@ -754,20 +835,19 @@ function Invoke-SelectedEntry {
 }
 
 function Switch-SelectedPin {
-    $text = Get-SelectedEntry
-    if ($null -eq $text) { return }
+    $entry = Get-SelectedEntry
+    if ($null -eq $entry) { return }
 
-    Switch-ClipboardPin $text
-    Update-PopupList
-    $Ui.List.SelectedIndex = $State.Filtered.IndexOf($text)
+    Switch-ClipboardPin $entry
+    Update-PopupList -SelectEntry $entry
 }
 
 function Remove-SelectedEntry {
-    $text = Get-SelectedEntry
-    if ($null -eq $text) { return }
+    $entry = Get-SelectedEntry
+    if ($null -eq $entry) { return }
 
     $index = $Ui.List.SelectedIndex
-    Remove-ClipboardEntry $text
+    Remove-ClipboardEntry $entry
     Update-PopupList $index
     Update-TrayText
 }
@@ -782,7 +862,7 @@ function Invoke-PopupKey {
     # Enum constants, not strings: a string switch would compare 'Return'/'Next' with 'Enter'/'PageDown'.
     switch ($KeyEvent.KeyCode) {
         ([Keys]::Escape) { Hide-Popup }
-        ([Keys]::Enter) { Invoke-SelectedEntry }
+        ([Keys]::Enter) { Invoke-SelectedEntry -PlainText:$KeyEvent.Shift }
         ([Keys]::Down) { Move-Selection 1 }
         ([Keys]::Up) { Move-Selection -1 }
         ([Keys]::PageDown) { Move-Selection $page }
@@ -1059,13 +1139,17 @@ function New-PopupWindow {
 function New-ListMenu {
     $menu = [ContextMenuStrip]::new()
 
-    $use = $menu.Items.Add('Paste')
-    $use.ShortcutKeyDisplayString = 'Enter'
-    $use.add_Click({ Invoke-SelectedEntry })
+    $Ui.ListMenuUse = $menu.Items.Add('Paste')
+    $Ui.ListMenuUse.ShortcutKeyDisplayString = 'Enter'
+    $Ui.ListMenuUse.add_Click({ Invoke-SelectedEntry })
 
-    $pin = $menu.Items.Add('Pin to top')
-    $pin.ShortcutKeyDisplayString = 'Ctrl+P'
-    $pin.add_Click({
+    $Ui.ListMenuPlain = $menu.Items.Add('Paste as plain text')
+    $Ui.ListMenuPlain.ShortcutKeyDisplayString = 'Shift+Enter'
+    $Ui.ListMenuPlain.add_Click({ Invoke-SelectedEntry -PlainText })
+
+    $Ui.ListMenuPin = $menu.Items.Add('Pin to top')
+    $Ui.ListMenuPin.ShortcutKeyDisplayString = 'Ctrl+P'
+    $Ui.ListMenuPin.add_Click({
         Switch-SelectedPin
         [void]$Ui.Search.Focus()
     })
@@ -1079,13 +1163,16 @@ function New-ListMenu {
 
     $menu.add_Opening({
         param($source, $e)
-        $index = $Ui.List.SelectedIndex
-        if ($index -lt 0 -or $index -ge $State.Filtered.Count) {
+        $entry = Get-SelectedEntry
+        if ($null -eq $entry) {
             $e.Cancel = $true
             return
         }
-        $source.Items[0].Text = if ($State.PasteTarget -ne [IntPtr]::Zero) { 'Paste' } else { 'Copy' }
-        $source.Items[1].Text = if ($index -lt $State.FilteredPinnedCount) { 'Unpin' } else { 'Pin to top' }
+        $verb = if ($State.PasteTarget -ne [IntPtr]::Zero) { 'Paste' } else { 'Copy' }
+        $Ui.ListMenuUse.Text = $verb
+        $Ui.ListMenuPlain.Text = "$verb as plain text"
+        $Ui.ListMenuPlain.Visible = $entry.HasFormatting   # same as the normal paste otherwise
+        $Ui.ListMenuPin.Text = if ($State.Pinned.Contains($entry)) { 'Unpin' } else { 'Pin to top' }
     })
 
     $Ui.ListMenu = $menu
@@ -1218,20 +1305,21 @@ if (-not $ownsMutex) {
 }
 
 $State = @{
-    History             = [List[string]]::new()   # unpinned entries, newest first
-    Pinned              = [List[string]]::new()   # pinned entries, in pin order
-    Filtered            = [List[string]]::new()   # entries currently shown in the popup
-    FilteredPinnedCount = 0
-    PasteTarget         = [IntPtr]::Zero          # window to paste into; zero = copy only
-    HotkeySpec          = $hotkeySpec             # modifiers and key code, independent of the layout
-    HotkeyText          = Format-HotkeySpec $hotkeySpec   # as shown to the user
-    HotkeyActive        = $false
-    ThemeSetting        = $Theme                  # Dark, Light or Auto; the tray menu switches it
-    PopupSize           = $Size                   # S, M or L; the tray menu changes it
-    KeepAwake           = $false                  # the tray menu switches it
-    IsDark              = $null
-    Colors              = $null
-    Gdi                 = @{}                     # brushes and pens of the current theme
+    History              = [List[PsClip.ClipEntry]]::new()   # unpinned entries, newest first
+    Pinned               = [List[PsClip.ClipEntry]]::new()   # pinned entries, in pin order
+    Filtered             = [List[PsClip.ClipEntry]]::new()   # entries currently shown in the popup
+    FilteredPinnedCount  = 0
+    OwnClipboardSequence = 0                     # sequence number of the clipboard change caused by pasting
+    PasteTarget          = [IntPtr]::Zero        # window to paste into; zero = copy only
+    HotkeySpec           = $hotkeySpec           # modifiers and key code, independent of the layout
+    HotkeyText           = Format-HotkeySpec $hotkeySpec   # as shown to the user
+    HotkeyActive         = $false
+    ThemeSetting         = $Theme                # Dark, Light or Auto; the tray menu switches it
+    PopupSize            = $Size                 # S, M or L; the tray menu changes it
+    KeepAwake            = $false                # the tray menu switches it
+    IsDark               = $null
+    Colors               = $null
+    Gdi                  = @{}                   # brushes and pens of the current theme
 }
 $Ui = @{
     AppContext = [ApplicationContext]::new()
@@ -1247,7 +1335,7 @@ try {
 
     $hotkeyOk = Register-Hotkey $hotkeySpec
     try {
-        $initial = Read-ClipboardText
+        $initial = Read-ClipboardEntry
         if ($null -ne $initial) { Add-ClipboardEntry $initial }
     }
     catch {

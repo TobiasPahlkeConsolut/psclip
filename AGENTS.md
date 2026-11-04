@@ -53,6 +53,11 @@ history, Popup, Theme, Keep awake, Window construction, Main.
 - **State lives in two script-level hashtables:** `$State` (history, pinned entries, filter result, paste target,
   hotkey, theme, size, keep awake) and `$Ui` (controls, fonts, metrics, timer, `ClipHost`, `AppContext`).
   Functions read and mutate them directly; the unit tests replace them with stand-ins (`Reset-TestState`).
+- **Entries are `PsClip.ClipEntry` objects** (C#): `Text` plus optional `Html` / `Rtf`. Lists hold the objects;
+  `Find-ClipboardEntry` compares content (`SameContent`: equal text), `List.Remove`/`Contains` compare references.
+  A re-copied entry replaces the old object (newer formatting wins); pasting moves the same object to the top.
+- `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
+  `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,
   `$State`, script-level variables, functions and their own parameters - never local variables of the
   constructing function. (Exception: `Show-HotkeyDialog`, whose handlers run inside `ShowDialog()`.)
@@ -65,9 +70,16 @@ history, Popup, Theme, Keep awake, Window construction, Main.
   (WM_CLIPBOARDUPDATE), `HotkeyPressed` (WM_HOTKEY) and `CloseRequested` (WM_CLOSE, used by `Install.ps1` and the
   test for a graceful stop).
 - Pasting: `Invoke-SelectedEntry` sets the clipboard, `ForceForeground`s the window that was active when the hotkey
-  was pressed, and `PsClip.Native.PasteInto` waits for released keys, checks the foreground again and sends Ctrl+V
-  with one `SendInput` call. Never send keystrokes without such a foreground check - also not in tests or ad-hoc
-  diagnostic scripts: they would type into whatever window the user has in front.
+  was pressed (while the popup is still open - hiding it first lets Windows activate another window), and
+  `PsClip.Native.PasteInto` waits for released keys, checks the foreground again and sends Ctrl+V with one
+  `SendInput` call. Never send keystrokes without such a foreground check - also not in tests or ad-hoc diagnostic
+  scripts: they would type into whatever window the user has in front.
+- `ForceForeground` tries a plain `SetForegroundWindow` first (allowed after a real hotkey press or tray click) and
+  attaches to another thread's input queue only as a fallback: attaching can leave a rich text box (Outlook, Word)
+  in a state where its window refuses activation later, so pasting back fails. `ClipboardManager.ps1 -Verbose`
+  logs which way the popup came to the front and why a paste was not sent.
+- Waiting on the UI thread during a paste uses `PsClip.Native.Wait`, not `Start-Sleep`: it keeps answering
+  messages other threads send (activation of another program's window may depend on it) without running app code.
 - Clipboard reading: custom formats (anything that is not text, HTML, RTF, bitmap, ...) must only be read with
   `PsClip.Native.ReadFormatBytes`. `DataObject.GetData()` deserializes them with BinaryFormatter, i.e. runs code
   chosen by whoever put them on the clipboard (another program, an RDP session). `GetDataPresent()` is safe.
@@ -95,6 +107,11 @@ history, Popup, Theme, Keep awake, Window construction, Main.
 - Under StrictMode, `$hashtable.MissingKey` throws; use `ContainsKey` where a key may be missing (e.g. cleanup code).
 - In tests, find windows and controls by process id and class name, not by asking which control has the focus:
   right after a window appears the focus may still be elsewhere.
+- Pester 3: `Assert-MockCalled` counts calls in the whole `Describe` by default - always pass `-Scope It`.
+- The end-to-end test opens the popup by pressing the test hotkey for real (while its own window is in front): a
+  posted `WM_HOTKEY` does not give psclip the right to take the foreground, which forces the fallback above.
+- `git commit -F -` from PowerShell: set `$OutputEncoding = [Text.UTF8Encoding]::new($false)` first, otherwise the
+  message may start with a byte order mark.
 
 ## Style
 

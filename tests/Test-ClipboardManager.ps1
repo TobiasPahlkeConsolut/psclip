@@ -306,9 +306,17 @@ function Send-PostedKey {
 }
 
 function Show-TestPopup {
-    # Simulates the hotkey; returns $true once the popup is in the foreground.
+    # Opens the popup with the hotkey; returns $true once the popup is in the foreground.
     if ([TestNative]::IsWindowVisible($popup)) { Hide-TestPopup }   # the hotkey toggles the popup
-    [void][TestNative]::PostMessage($hostWindow, [TestNative]::WM_HOTKEY, [IntPtr]1, [IntPtr]::Zero)
+    if (Test-Foreground $target.Handle) {
+        # Press it for real while the test window is in front, like a user: Windows then lets
+        # psclip take the foreground (a posted WM_HOTKEY does not).
+        [TestNative]::PressKeys([byte[]]($script:currentHotkeyKeys))
+    }
+    else {
+        [void][TestNative]::AllowSetForegroundWindow($manager.Id)
+        [void][TestNative]::PostMessage($hostWindow, [TestNative]::WM_HOTKEY, [IntPtr]1, [IntPtr]::Zero)
+    }
     Wait-Until { [TestNative]::IsWindowVisible($popup) -and (Test-Foreground $popup) }
 }
 
@@ -439,6 +447,7 @@ $keepAwakeSeconds = 2   # short, so that the keep-awake step takes seconds inste
 # The test instance: own name (mutex, hidden window) and own hotkey, so it runs next to a psclip in use.
 $instanceName = 'PsClipboardManagerTest'
 $testHotkey = @{ Text = 'Ctrl+Alt+Shift+F8'; Modifiers = 0x7; VirtualKey = 0x77 }
+$currentHotkeyKeys = 0x11, 0x12, 0x10, 0x77   # Ctrl, Alt, Shift, F8 - changed by the hotkey dialog step
 
 [void][TestNative]::SetProcessDPIAware()
 $screen = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
@@ -464,13 +473,12 @@ $manager = Start-Process powershell.exe -NoNewWindow -PassThru `
     -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"", '-Theme', $Theme,
     '-KeepAwakeSeconds', $keepAwakeSeconds, '-InstanceName', $instanceName, '-Hotkey', $testHotkey.Text, '-Verbose'
 
-# The window the popup pastes into
+# The window the popup pastes into - a rich text box, to see whether formatting arrives
 $target = [Form]::new()
 $target.Text = 'Paste target (test)'
 $target.TopMost = $true
 $target.Size = [System.Drawing.Size]::new(400, 200)
-$targetBox = [TextBox]::new()
-$targetBox.Multiline = $true
+$targetBox = [RichTextBox]::new()
 $targetBox.Dock = 'Fill'
 $target.Controls.Add($targetBox)
 
@@ -552,6 +560,40 @@ try {
     $pasted = Wait-Until { $targetBox.Text -eq 'psclip test: alpha' }
     Add-Result 'Enter pastes into the previously active window' $pasted "target text: '$($targetBox.Text)'"
 
+    # --- formatting: Enter pastes with formatting, Shift+Enter as plain text ---
+    $boldText = 'psclip test: bold'
+    $formatted = [DataObject]::new()
+    $formatted.SetText($boldText)
+    $formatted.SetData([DataFormats]::Rtf, '{\rtf1\ansi{\b ' + $boldText + '}}')
+    [Clipboard]::SetDataObject($formatted, $true)
+    Wait-Milliseconds 400
+
+    $pastes = @{}
+    foreach ($mode in 'formatted', 'plain', 'formatted again') {
+        $targetBox.Clear()
+        if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
+            Send-PostedKey $searchBox $keyDown   # the entry below the pinned one
+            Wait-Milliseconds 200
+            if ($mode -ne 'plain') {
+                Send-PostedKey $searchBox $keyEnter
+            }
+            elseif (Test-Foreground $popup) {
+                [TestNative]::PressKeys(0x10, $keyEnter)   # real Shift+Enter: the popup reads the Shift state
+            }
+            [void](Wait-Until { $targetBox.Text -eq $boldText })
+        }
+        $pastes[$mode] = [pscustomobject]@{
+            Text = $targetBox.Text
+            Bold = $targetBox.Rtf -cmatch '\\b[ \\]'   # RTF bold control word
+        }
+    }
+    Add-Result 'Enter pastes with formatting' ($pastes.formatted.Text -eq $boldText -and $pastes.formatted.Bold) `
+        "text '$($pastes.formatted.Text)', bold: $($pastes.formatted.Bold)"
+    Add-Result 'Shift+Enter pastes plain text' ($pastes.plain.Text -eq $boldText -and -not $pastes.plain.Bold) `
+        "text '$($pastes.plain.Text)', bold: $($pastes.plain.Bold)"
+    Add-Result 'A plain paste keeps the stored formatting' ($pastes.'formatted again'.Bold) `
+        "bold: $($pastes.'formatted again'.Bold)"
+
     # --- popup size: medium by default, manual resizing is reset on the next opening ---
     $mediumHeight = [int](360 * $scale)
     $openedHeight = $resizedHeight = $reopenedHeight = -1
@@ -616,6 +658,7 @@ try {
 
         $newTaken = -not (Test-HotkeyFree 0x7 0x78)
         $oldFree = Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey
+        if ($newTaken) { $script:currentHotkeyKeys = 0x11, 0x12, 0x10, 0x78 }   # Ctrl, Alt, Shift, F9
         Add-Result 'New hotkey registered, old one released' ($newTaken -and $oldFree) "new taken: $newTaken, old free: $oldFree"
     }
 

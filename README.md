@@ -14,6 +14,8 @@ The history lives in memory only and is gone when the script exits.
 - Records all text you copy, newest first (default: last 200 entries; copying an entry again moves it to the top)
 - **Hotkey popup** (default `Ctrl+Ö` on a German keyboard) next to the mouse cursor: type to filter, `Enter` pastes
   into the window you were working in
+- **Keeps the formatting** (HTML and RTF, e.g. from Word, Outlook or a browser): `Enter` pastes with formatting,
+  `Shift+Enter` as plain text
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"
 - **Dark mode** (default) or light mode, switchable from the tray menu
 - **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
@@ -99,13 +101,14 @@ Press the hotkey anywhere. The popup opens at the mouse cursor:
 | ------------------------------ | ------------------------------------------------ |
 | *type*                         | Filter - every word must match, case-insensitive |
 | `Up` / `Down`, `PgUp` / `PgDn` | Move the selection                               |
-| `Enter`, double-click          | Paste the entry into the window that was active  |
+| `Enter`, double-click          | Paste the entry into the window that was active, with its formatting |
+| `Shift+Enter`                  | Paste it as plain text                           |
 | `Ctrl+P`                       | Pin / unpin the entry                            |
 | `Shift+Delete`                 | Remove the entry                                 |
 | `Esc`, click elsewhere         | Close                                            |
 
-Right-click an entry for the same actions. You can resize the popup while it is open; the next time it opens at the
-chosen size again.
+Right-click an entry for the same actions (*Paste as plain text* appears for entries with formatting). You can resize
+the popup while it is open; the next time it opens at the chosen size again.
 
 The **tray icon** (a small blue clipboard, possibly in the `^` overflow area of the taskbar):
 
@@ -173,8 +176,8 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 
 ## Limitations
 
-- **Text only.** Images, files and formatting are not recorded; pasting inserts plain text. Texts longer than
-  1,000,000 characters (`-MaxEntryLength`) are skipped.
+- **Text with its formatting only.** Images and files are not recorded. Texts longer than 1,000,000 characters
+  (`-MaxEntryLength`) are skipped; formatting larger than that is dropped and the text kept.
 - **In memory only** means psclip never writes the history anywhere. Windows itself may still move memory to the
   page file or into a crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is
@@ -193,9 +196,9 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 | `tests/`               | Unit tests and the end-to-end test                                           |
 
 At startup, `ClipboardManager.ps1` compiles `PsClip.cs` (`Add-Type`): a hidden window receives clipboard-change
-notifications (`AddClipboardFormatListener`) and the global hotkey (`RegisterHotKey`); pasting puts the entry on the
-clipboard, brings the previous window back to the front and sends `Ctrl+V`. The popup, tray icon and dialogs are
-Windows Forms. Everything else is PowerShell.
+notifications (`AddClipboardFormatListener`) and the global hotkey (`RegisterHotKey`). Each entry keeps the text plus
+its HTML and RTF formatting in memory. Pasting puts the entry back on the clipboard, brings the previous window to
+the front and sends `Ctrl+V`. The popup, tray icon and dialogs are Windows Forms. Everything else is PowerShell.
 
 ## Development
 

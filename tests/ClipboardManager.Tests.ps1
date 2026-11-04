@@ -18,10 +18,11 @@ $upperUmlaut = [string][char]0xD6
 function Reset-TestState {
     # Minimal $State / $Ui as built by the Main region, with stand-ins for the tray controls.
     $script:State = @{
-        History             = [System.Collections.Generic.List[string]]::new()
-        Pinned              = [System.Collections.Generic.List[string]]::new()
-        Filtered            = [System.Collections.Generic.List[string]]::new()
-        FilteredPinnedCount = 0
+        History              = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
+        Pinned               = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
+        Filtered             = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
+        FilteredPinnedCount  = 0
+        OwnClipboardSequence = 0
         PasteTarget         = [IntPtr]::Zero
         HotkeySpec          = [pscustomobject]@{ Modifiers = 6; VirtualKey = 0x56 }
         HotkeyText          = 'Ctrl+Shift+V'
@@ -46,7 +47,24 @@ function Reset-TestState {
 
 function Add-Entries {
     param([string[]]$Texts)
-    foreach ($text in $Texts) { Add-ClipboardEntry $text }
+    foreach ($text in $Texts) { Add-ClipboardEntry ([PsClip.ClipEntry]::new($text)) }
+}
+
+function Get-Entry {
+    # The entry with this text from the pinned entries or the history.
+    param([string]$Text)
+    foreach ($entry in @($State.Pinned) + @($State.History)) {
+        if ($entry.Text -ceq $Text) { return $entry }
+    }
+    throw "No entry '$Text'"
+}
+
+function New-FormattedEntry {
+    param([string]$Text, [string]$Rtf = $null, [string]$Html = $null)
+    $entry = [PsClip.ClipEntry]::new($Text)
+    $entry.Rtf = $Rtf
+    $entry.Html = $Html
+    $entry
 }
 
 function New-KeyEvent {
@@ -264,7 +282,9 @@ Describe 'Update-HotkeyDialog' {
     }
 }
 
-Describe 'Read-ClipboardText' {
+Describe 'Read-ClipboardEntry' {
+    BeforeEach { Reset-TestState }
+
     function New-Data {
         param([string]$Text)
         $data = [System.Windows.Forms.DataObject]::new()
@@ -277,32 +297,52 @@ Describe 'Read-ClipboardText' {
         [System.IO.MemoryStream]::new($Bytes)
     }
 
-    It 'returns the text' {
-        Read-ClipboardText (New-Data 'hello') | Should BeExactly 'hello'
+    It 'returns the text, without formatting if there is none' {
+        $entry = Read-ClipboardEntry (New-Data 'hello')
+        $entry.Text | Should BeExactly 'hello'
+        $entry.HasFormatting | Should Be $false
+    }
+
+    It 'keeps HTML and RTF formatting' {
+        $data = New-Data 'bold'
+        $data.SetData([System.Windows.Forms.DataFormats]::Rtf, '{\rtf1 {\b bold}}')
+        $data.SetData([System.Windows.Forms.DataFormats]::Html, '<b>bold</b>')
+        $entry = Read-ClipboardEntry $data
+        $entry.Rtf | Should BeExactly '{\rtf1 {\b bold}}'
+        $entry.Html | Should BeExactly '<b>bold</b>'
+    }
+
+    It 'drops formatting larger than MaxEntryLength but keeps the text' {
+        $script:MaxEntryLength = 100
+        $data = New-Data 'text'
+        $data.SetData([System.Windows.Forms.DataFormats]::Rtf, '{\rtf1 ' + ('x' * 200) + '}')
+        $entry = Read-ClipboardEntry $data
+        $entry.Text | Should BeExactly 'text'
+        $entry.Rtf | Should BeNullOrEmpty
     }
 
     It 'returns nothing when there is no text' {
         $data = New-Data
         $data.SetData('Some Format', $false, (New-Flag 1, 2, 3))
-        Read-ClipboardText $data | Should BeNullOrEmpty
+        Read-ClipboardEntry $data | Should BeNullOrEmpty
     }
 
     It 'ignores content marked ExcludeClipboardContentFromMonitorProcessing' {
         $data = New-Data 'secret'
         $data.SetData('ExcludeClipboardContentFromMonitorProcessing', $false, (New-Flag 0, 0, 0, 0))
-        Read-ClipboardText $data | Should BeNullOrEmpty
+        Read-ClipboardEntry $data | Should BeNullOrEmpty
     }
 
     It 'ignores content with CanIncludeInClipboardHistory = 0' {
         $data = New-Data 'secret'
         $data.SetData('CanIncludeInClipboardHistory', $false, (New-Flag 0, 0, 0, 0))
-        Read-ClipboardText $data | Should BeNullOrEmpty
+        Read-ClipboardEntry $data | Should BeNullOrEmpty
     }
 
     It 'keeps content with CanIncludeInClipboardHistory = 1' {
         $data = New-Data 'text'
         $data.SetData('CanIncludeInClipboardHistory', $false, (New-Flag 1, 0, 0, 0))
-        Read-ClipboardText $data | Should BeExactly 'text'
+        (Read-ClipboardEntry $data).Text | Should BeExactly 'text'
     }
 
     It 'reads CanIncludeInClipboardHistory as raw bytes, never as an object' {
@@ -312,7 +352,42 @@ Describe 'Read-ClipboardText' {
         $data.SetData('CanIncludeInClipboardHistory', $false, [System.Collections.Generic.List[string]]::new())
         $bytes = [PsClip.Native]::ReadFormatBytes($data, 'CanIncludeInClipboardHistory', 4096)
         ($bytes -is [byte[]]) | Should Be $true
-        Read-ClipboardText $data | Should BeExactly 'text'
+        (Read-ClipboardEntry $data).Text | Should BeExactly 'text'
+    }
+}
+
+Describe 'Receive-ClipboardChange' {
+    BeforeEach {
+        Reset-TestState
+        $script:Ui.List = [pscustomobject]@{ SelectedIndex = -1 }
+        Mock Read-ClipboardEntry { [PsClip.ClipEntry]::new('new') }
+    }
+
+    It 'records a clipboard change' {
+        Receive-ClipboardChange
+        $State.History -join '|' | Should BeExactly 'new'
+    }
+
+    It 'ignores the change caused by pasting an entry' {
+        $State.OwnClipboardSequence = [PsClip.Native]::GetClipboardSequenceNumber()
+        Receive-ClipboardChange
+        Assert-MockCalled Read-ClipboardEntry -Scope It -Exactly 0
+        $State.History.Count | Should Be 0
+    }
+}
+
+Describe 'New-ClipboardData' {
+    It 'puts text and formatting on the clipboard' {
+        $data = New-ClipboardData (New-FormattedEntry 'bold' -Rtf '{\rtf1 {\b bold}}' -Html '<b>bold</b>')
+        $data.GetText() | Should BeExactly 'bold'
+        $data.GetData([System.Windows.Forms.DataFormats]::Rtf) | Should BeExactly '{\rtf1 {\b bold}}'
+        $data.GetData([System.Windows.Forms.DataFormats]::Html) | Should BeExactly '<b>bold</b>'
+    }
+
+    It 'puts only the text on the clipboard with -PlainText' {
+        $data = New-ClipboardData (New-FormattedEntry 'bold' -Rtf '{\rtf1 {\b bold}}') -PlainText
+        $data.GetText() | Should BeExactly 'bold'
+        $data.GetDataPresent([System.Windows.Forms.DataFormats]::Rtf) | Should Be $false
     }
 }
 
@@ -367,25 +442,52 @@ Describe 'Clipboard history' {
         $State.History -join '|' | Should BeExactly 'e5|e4|e3'
     }
 
+    It 'replaces a re-copied entry, so that the newer formatting wins' {
+        Add-ClipboardEntry (New-FormattedEntry 'text' -Rtf 'old')
+        Add-Entries 'other'
+        Add-ClipboardEntry (New-FormattedEntry 'text' -Rtf 'new')
+        $State.History -join '|' | Should BeExactly 'text|other'
+        $State.History[0].Rtf | Should BeExactly 'new'
+    }
+
+    It 'updates a re-copied pinned entry in its place' {
+        Add-Entries 'a', 'b'
+        Switch-ClipboardPin (Get-Entry 'a')
+        Switch-ClipboardPin (Get-Entry 'b')
+        Add-ClipboardEntry (New-FormattedEntry 'a' -Html '<i>a</i>')
+        $State.Pinned -join '|' | Should BeExactly 'a|b'
+        $State.Pinned[0].Html | Should BeExactly '<i>a</i>'
+        $State.History.Count | Should Be 0
+    }
+
+    It 'moves a pasted entry to the top, keeping the entry itself' {
+        Add-ClipboardEntry (New-FormattedEntry 'formatted' -Rtf 'rtf')
+        Add-Entries 'newer'
+        $entry = Get-Entry 'formatted'
+        Move-ClipboardEntryToTop $entry
+        [object]::ReferenceEquals($State.History[0], $entry) | Should Be $true
+        $State.History[0].Rtf | Should BeExactly 'rtf'
+    }
+
     It 'appends pinned entries to the pinned group' {
         Add-Entries 'a', 'b', 'c'
-        Switch-ClipboardPin 'b'
-        Switch-ClipboardPin 'a'
+        Switch-ClipboardPin (Get-Entry 'b')
+        Switch-ClipboardPin (Get-Entry 'a')
         $State.Pinned -join '|' | Should BeExactly 'b|a'
         $State.History -join '|' | Should BeExactly 'c'
     }
 
     It 'moves an unpinned entry to the top of the history' {
         Add-Entries 'a', 'b'
-        Switch-ClipboardPin 'a'
-        Switch-ClipboardPin 'a'
+        Switch-ClipboardPin (Get-Entry 'a')
+        Switch-ClipboardPin (Get-Entry 'a')
         $State.Pinned.Count | Should Be 0
         $State.History -join '|' | Should BeExactly 'a|b'
     }
 
     It 'does not add a pinned entry to the history again' {
         Add-Entries 'a'
-        Switch-ClipboardPin 'a'
+        Switch-ClipboardPin (Get-Entry 'a')
         Add-Entries 'a'
         $State.History.Count | Should Be 0
         $State.Pinned -join '|' | Should BeExactly 'a'
@@ -394,7 +496,7 @@ Describe 'Clipboard history' {
     It 'never drops pinned entries because of MaxItems' {
         $script:MaxItems = 2
         Add-Entries 'pinned'
-        Switch-ClipboardPin 'pinned'
+        Switch-ClipboardPin (Get-Entry 'pinned')
         Add-Entries 'x', 'y', 'z'
         $State.Pinned -join '|' | Should BeExactly 'pinned'
         $State.History -join '|' | Should BeExactly 'z|y'
@@ -402,15 +504,15 @@ Describe 'Clipboard history' {
 
     It 'removes pinned and unpinned entries' {
         Add-Entries 'a', 'b'
-        Switch-ClipboardPin 'a'
-        Remove-ClipboardEntry 'a'
-        Remove-ClipboardEntry 'b'
+        Switch-ClipboardPin (Get-Entry 'a')
+        Remove-ClipboardEntry (Get-Entry 'a')
+        Remove-ClipboardEntry (Get-Entry 'b')
         $State.Pinned.Count + $State.History.Count | Should Be 0
     }
 
     It 'clears the history but keeps pinned entries' {
         Add-Entries 'a', 'b', 'c'
-        Switch-ClipboardPin 'a'
+        Switch-ClipboardPin (Get-Entry 'a')
         Clear-ClipboardHistory
         $State.History.Count | Should Be 0
         $State.Pinned -join '|' | Should BeExactly 'a'
@@ -426,7 +528,7 @@ Describe 'Update-PopupList' {
         $script:Ui.List = [System.Windows.Forms.ListBox]::new()
         $script:Ui.Status = [System.Windows.Forms.Label]::new()
         Add-Entries 'one', 'two', 'three'   # history: three, two, one
-        Switch-ClipboardPin 'one'
+        Switch-ClipboardPin (Get-Entry 'one')
     }
 
     AfterEach {
@@ -459,11 +561,11 @@ Describe 'Update-PopupList' {
     It 'keeps the selected entry when a new one arrives' {
         Update-PopupList -SelectIndex 1
         $selected = Get-SelectedEntry
-        $selected | Should BeExactly 'three'
+        $selected.Text | Should BeExactly 'three'
 
-        Add-ClipboardEntry 'four'
+        Add-Entries 'four'
         Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry $selected
-        Get-SelectedEntry | Should BeExactly 'three'
+        (Get-SelectedEntry).Text | Should BeExactly 'three'
     }
 
     It 'says paste or copy depending on the target window' {
@@ -486,7 +588,7 @@ Describe 'Hide-Popup' {
         $script:Ui.Form = $form
         $script:Ui.List = [System.Windows.Forms.ListBox]::new()
         [void]$Ui.List.Items.Add('secret preview')
-        $State.Filtered.Add('secret')
+        $State.Filtered.Add([PsClip.ClipEntry]::new('secret'))
 
         Hide-Popup
 
@@ -512,10 +614,15 @@ Describe 'Invoke-PopupKey' {
         $enter = New-KeyEvent 'Return'
         Invoke-PopupKey $enter
         Invoke-PopupKey (New-KeyEvent 'Escape')
-        Assert-MockCalled Invoke-SelectedEntry -Exactly 1
-        Assert-MockCalled Hide-Popup -Exactly 1
+        Assert-MockCalled Invoke-SelectedEntry -Scope It -Exactly 1 -ParameterFilter { -not $PlainText }
+        Assert-MockCalled Hide-Popup -Scope It -Exactly 1
         $enter.Handled | Should Be $true
         $enter.SuppressKeyPress | Should Be $true
+    }
+
+    It 'pastes as plain text with Shift+Enter' {
+        Invoke-PopupKey (New-KeyEvent 'Shift, Return')
+        Assert-MockCalled Invoke-SelectedEntry -Scope It -Exactly 1 -ParameterFilter { $PlainText }
     }
 
     It 'moves by one row with Up/Down and by a page with PgUp/PgDn' {
@@ -523,17 +630,17 @@ Describe 'Invoke-PopupKey' {
         Invoke-PopupKey (New-KeyEvent 'Up')
         Invoke-PopupKey (New-KeyEvent 'PageDown')
         Invoke-PopupKey (New-KeyEvent 'PageUp')
-        Assert-MockCalled Move-Selection -Exactly 1 -ParameterFilter { $Delta -eq 1 }
-        Assert-MockCalled Move-Selection -Exactly 1 -ParameterFilter { $Delta -eq -1 }
-        Assert-MockCalled Move-Selection -Exactly 1 -ParameterFilter { $Delta -eq 10 }
-        Assert-MockCalled Move-Selection -Exactly 1 -ParameterFilter { $Delta -eq -10 }
+        Assert-MockCalled Move-Selection -Scope It -Exactly 1 -ParameterFilter { $Delta -eq 1 }
+        Assert-MockCalled Move-Selection -Scope It -Exactly 1 -ParameterFilter { $Delta -eq -1 }
+        Assert-MockCalled Move-Selection -Scope It -Exactly 1 -ParameterFilter { $Delta -eq 10 }
+        Assert-MockCalled Move-Selection -Scope It -Exactly 1 -ParameterFilter { $Delta -eq -10 }
     }
 
     It 'pins with Ctrl+P, but lets a plain P through to the filter box' {
         $plain = New-KeyEvent 'P'
         Invoke-PopupKey $plain
         Invoke-PopupKey (New-KeyEvent 'Control, P')
-        Assert-MockCalled Switch-SelectedPin -Exactly 1
+        Assert-MockCalled Switch-SelectedPin -Scope It -Exactly 1
         $plain.Handled | Should Be $false
     }
 
@@ -541,7 +648,7 @@ Describe 'Invoke-PopupKey' {
         $plain = New-KeyEvent 'Delete'
         Invoke-PopupKey $plain
         Invoke-PopupKey (New-KeyEvent 'Shift, Delete')
-        Assert-MockCalled Remove-SelectedEntry -Exactly 1
+        Assert-MockCalled Remove-SelectedEntry -Scope It -Exactly 1
         $plain.Handled | Should Be $false
     }
 }
