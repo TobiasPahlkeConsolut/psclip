@@ -35,12 +35,14 @@ function Reset-TestState {
         Gdi                 = @{}
     }
     $script:Ui = @{
-        Form           = [pscustomobject]@{ Visible = $false }
-        HotkeyMenuItem = [pscustomobject]@{ Text = '' }
-        Tray           = [pscustomobject]@{ Text = '' }
-        KeepAwakeTimer = [pscustomobject]@{ Enabled = $false }
+        Form            = [pscustomobject]@{ Visible = $false }
+        HotkeyMenuItem  = [pscustomobject]@{ Text = '' }
+        Tray            = [pscustomobject]@{ Text = '' }
+        KeepAwakeTimer  = [pscustomobject]@{ Enabled = $false }
+        ThumbnailHeight = 22
     }
     $script:MaxItems = 200
+    $script:MaxImages = 20
     $script:MaxEntryLength = 1000000
     $script:KeepAwakeSeconds = 30
 }
@@ -65,6 +67,21 @@ function New-FormattedEntry {
     $entry.Rtf = $Rtf
     $entry.Html = $Html
     $entry
+}
+
+function New-TestImage {
+    # A plain-colored bitmap; different colors give different images.
+    param([int]$Width = 40, [int]$Height = 20, [string]$Color = 'SteelBlue')
+    $bitmap = [System.Drawing.Bitmap]::new($Width, $Height)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.Clear([System.Drawing.Color]::FromName($Color))
+    $graphics.Dispose()
+    $bitmap
+}
+
+function New-ImageEntry {
+    param([string]$Color = 'SteelBlue', [int]$Width = 40, [int]$Height = 20)
+    [PsClip.ClipEntry]::FromImage((New-TestImage $Width $Height $Color), 22)
 }
 
 function New-KeyEvent {
@@ -353,6 +370,89 @@ Describe 'Read-ClipboardEntry' {
         $bytes = [PsClip.Native]::ReadFormatBytes($data, 'CanIncludeInClipboardHistory', 4096)
         ($bytes -is [byte[]]) | Should Be $true
         (Read-ClipboardEntry $data).Text | Should BeExactly 'text'
+    }
+}
+
+Describe 'Image entries' {
+    BeforeEach { Reset-TestState }
+
+    It 'keep the image as PNG with its size and a small thumbnail' {
+        $entry = New-ImageEntry -Width 400 -Height 100
+        $entry.IsImage | Should Be $true
+        "$($entry.Width)x$($entry.Height)" | Should Be '400x100'
+        ($entry.Png[1..3] | ForEach-Object { [char]$_ }) -join '' | Should Be 'PNG'
+        $entry.Thumbnail.Height | Should Not BeGreaterThan 22
+        $entry.Thumbnail.Width | Should Not BeGreaterThan 66
+        $entry.ToBitmap().Width | Should Be 400
+    }
+
+    It 'recognize the same image again, and tell different ones apart' {
+        (New-ImageEntry 'Red').SameContent((New-ImageEntry 'Red')) | Should Be $true
+        (New-ImageEntry 'Red').SameContent((New-ImageEntry 'Green')) | Should Be $false
+        (New-ImageEntry).SameContent([PsClip.ClipEntry]::new('Image 40 x 20')) | Should Be $false
+    }
+
+    It 'are read from the clipboard bitmap when there is no text' {
+        $data = [System.Windows.Forms.DataObject]::new()
+        $data.SetImage((New-TestImage 30 10))
+        $entry = Read-ClipboardEntry $data
+        $entry.IsImage | Should Be $true
+        $entry.Width | Should Be 30
+    }
+
+    It 'are read from the PNG format as raw bytes' {
+        $data = [System.Windows.Forms.DataObject]::new()
+        $data.SetData('PNG', $false, [System.IO.MemoryStream]::new((New-ImageEntry -Width 25 -Height 15).Png))
+        $entry = Read-ClipboardEntry $data
+        "$($entry.Width)x$($entry.Height)" | Should Be '25x15'
+    }
+
+    It 'lose against text, e.g. Excel cells offered as text and as a picture' {
+        $data = [System.Windows.Forms.DataObject]::new()
+        $data.SetText('cells')
+        $data.SetImage((New-TestImage))
+        $entry = Read-ClipboardEntry $data
+        $entry.IsImage | Should Be $false
+        $entry.Text | Should BeExactly 'cells'
+    }
+
+    It 'are not recorded with MaxImages 0' {
+        $script:MaxImages = 0
+        $data = [System.Windows.Forms.DataObject]::new()
+        $data.SetImage((New-TestImage))
+        Read-ClipboardEntry $data | Should BeNullOrEmpty
+    }
+
+    It 'move to the top when copied again instead of appearing twice' {
+        Add-ClipboardEntry (New-ImageEntry 'Red')
+        Add-Entries 'text'
+        Add-ClipboardEntry (New-ImageEntry 'Red')
+        $State.History -join '|' | Should BeExactly 'Image 40 x 20|text'
+    }
+
+    It 'are limited to the newest MaxImages, without touching texts' {
+        $script:MaxImages = 2
+        Add-ClipboardEntry (New-ImageEntry 'Red')
+        Add-Entries 'a'
+        Add-ClipboardEntry (New-ImageEntry 'Green')
+        Add-ClipboardEntry (New-ImageEntry 'Blue')
+        @($State.History | Where-Object { $_.IsImage }).Count | Should Be 2
+        $State.History.Count | Should Be 3
+        $State.History[-1].Text | Should BeExactly 'a'
+    }
+
+    It 'go back on the clipboard as bitmap and PNG' {
+        $data = New-ClipboardData (New-ImageEntry)
+        $data.GetImage().Width | Should Be 40
+        $data.GetDataPresent('PNG') | Should Be $true
+        $data.GetDataPresent([System.Windows.Forms.DataFormats]::UnicodeText) | Should Be $false
+    }
+
+    It 'show their size in the list and are found by the word image' {
+        $entry = New-ImageEntry -Width 40 -Height 20
+        Get-EntryPreview $entry | Should BeExactly "Image 40 $([char]0xD7) 20"
+        Test-FilterMatch (Get-EntrySearchText $entry) @('IMAGE') | Should Be $true
+        Test-FilterMatch (Get-EntrySearchText $entry) @('text') | Should Be $false
     }
 }
 

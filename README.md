@@ -16,6 +16,7 @@ The history lives in memory only and is gone when the script exits.
   into the window you were working in
 - **Keeps the formatting** (HTML and RTF, e.g. from Word, Outlook or a browser): `Enter` pastes with formatting,
   `Shift+Enter` as plain text
+- **Images** too, e.g. screenshots: shown with a thumbnail, found by typing `image`; the last 20 are kept
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"
 - **Dark mode** (default) or light mode, switchable from the tray menu
 - **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
@@ -145,6 +146,7 @@ windows). Windows then never sees the session as idle. While you are working, no
 | `-Size`             | `M`      | Popup size `S`, `M` or `L` - mostly the height (about 6, 10 or 17 entries visible) |
 | `-MaxItems`         | `200`    | Unpinned entries to keep                                                    |
 | `-MaxEntryLength`   | `1000000`| Texts with more characters are not recorded                                 |
+| `-MaxImages`        | `20`     | Unpinned images to keep (they need much more memory than text); `0` = none  |
 | `-KeepAwake`        | off      | Start with *Keep awake* switched on                                         |
 | `-KeepAwakeSeconds` | `30`     | Idle seconds before *Keep awake* presses F15                                |
 | `-InstanceName`     | `PsClipboardManager` | Only to run a second, separate instance (the end-to-end test does)  |
@@ -176,8 +178,9 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 
 ## Limitations
 
-- **Text with its formatting only.** Images and files are not recorded. Texts longer than 1,000,000 characters
-  (`-MaxEntryLength`) are skipped; formatting larger than that is dropped and the text kept.
+- **Text (with formatting) and images only.** Copied files are not recorded. When the clipboard holds both text and
+  an image (e.g. Excel cells), psclip keeps the text. Texts longer than 1,000,000 characters (`-MaxEntryLength`) and
+  images over 100 megapixels are skipped; formatting larger than the limit is dropped and the text kept.
 - **In memory only** means psclip never writes the history anywhere. Windows itself may still move memory to the
   page file or into a crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is
@@ -197,7 +200,7 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 
 At startup, `ClipboardManager.ps1` compiles `PsClip.cs` (`Add-Type`): a hidden window receives clipboard-change
 notifications (`AddClipboardFormatListener`) and the global hotkey (`RegisterHotKey`). Each entry keeps the text plus
-its HTML and RTF formatting in memory. Pasting puts the entry back on the clipboard, brings the previous window to
+its HTML and RTF formatting in memory, images are kept PNG-compressed. Pasting puts the entry back on the clipboard, brings the previous window to
 the front and sends `Ctrl+V`. The popup, tray icon and dialogs are Windows Forms. Everything else is PowerShell.
 
 ## Development

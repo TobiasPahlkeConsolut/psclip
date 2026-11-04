@@ -23,6 +23,9 @@
 .PARAMETER MaxItems
     Passed on to ClipboardManager.ps1.
 
+.PARAMETER MaxImages
+    Passed on to ClipboardManager.ps1: images to keep (default 20, 0 = none).
+
 .PARAMETER Theme
     Passed on to ClipboardManager.ps1: Dark (default), Light or Auto.
 
@@ -69,6 +72,10 @@ param(
     [Parameter(ParameterSetName = 'Install')]
     [ValidateRange(1, 100000)]
     [int]$MaxItems,
+
+    [Parameter(ParameterSetName = 'Install')]
+    [ValidateRange(0, 1000)]
+    [int]$MaxImages,
 
     [Parameter(ParameterSetName = 'Install')]
     [ValidateSet('Dark', 'Light', 'Auto')]
@@ -147,7 +154,7 @@ function Get-ShortcutArguments {
     param([System.Collections.IDictionary]$Settings)   # $PSBoundParameters or a hashtable
 
     $arguments = @('--headless', $powershellExe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managerScript)
-    foreach ($name in 'Hotkey', 'MaxItems', 'Theme', 'Size', 'KeepAwakeSeconds') {
+    foreach ($name in 'Hotkey', 'MaxItems', 'MaxImages', 'Theme', 'Size', 'KeepAwakeSeconds') {
         if ($Settings.Contains($name)) { $arguments += "-$name", [string]$Settings[$name] }
     }
     if ($Settings.Contains('KeepAwake') -and [bool]$Settings['KeepAwake']) { $arguments += '-KeepAwake' }

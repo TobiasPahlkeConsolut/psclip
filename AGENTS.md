@@ -53,9 +53,14 @@ history, Popup, Theme, Keep awake, Window construction, Main.
 - **State lives in two script-level hashtables:** `$State` (history, pinned entries, filter result, paste target,
   hotkey, theme, size, keep awake) and `$Ui` (controls, fonts, metrics, timer, `ClipHost`, `AppContext`).
   Functions read and mutate them directly; the unit tests replace them with stand-ins (`Reset-TestState`).
-- **Entries are `PsClip.ClipEntry` objects** (C#): `Text` plus optional `Html` / `Rtf`. Lists hold the objects;
-  `Find-ClipboardEntry` compares content (`SameContent`: equal text), `List.Remove`/`Contains` compare references.
-  A re-copied entry replaces the old object (newer formatting wins); pasting moves the same object to the top.
+- **Entries are `PsClip.ClipEntry` objects** (C#): `Text` plus optional `Html` / `Rtf`, or an image (`Png` bytes,
+  `Width`, `Height`, `Thumbnail`; `Text` is null - use `Get-EntryPreview` / `Get-EntrySearchText`). Lists hold the
+  objects; `Find-ClipboardEntry` compares content (`SameContent`: equal text, or equal image hash),
+  `List.Remove`/`Contains` compare references. A re-copied entry replaces the old object (newer formatting wins);
+  pasting moves the same object to the top. `Limit-ClipboardHistory` caps all unpinned entries (`MaxItems`) and
+  unpinned images (`MaxImages`).
+- Images are read from the "PNG" format (with `ReadFormatBytes` - it is a custom format) or the standard bitmap,
+  and only when the clipboard holds no text.
 - `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
   `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,
@@ -102,7 +107,7 @@ history, Popup, Theme, Keep awake, Window construction, Main.
 - Generic methods with `[ref]` arguments (e.g. `[Enum]::TryParse`) don't resolve reliably in 5.1; use the
   non-generic API or casts in `try/catch` instead.
 - Double quotes inside arguments to native programs are mangled by PowerShell 5.1 (e.g. `git commit -m` with a
-  quoted word); pass such text through stdin or a file (`git commit -F -`).
+  quoted word); pass such text through a file (see Git below).
 - `$input`, `$args`, `$matches`, `$event`, `$sender` and `$this` are automatic variables - do not use them as names.
 - Under StrictMode, `$hashtable.MissingKey` throws; use `ContainsKey` where a key may be missing (e.g. cleanup code).
 - In tests, find windows and controls by process id and class name, not by asking which control has the focus:
@@ -110,8 +115,9 @@ history, Popup, Theme, Keep awake, Window construction, Main.
 - Pester 3: `Assert-MockCalled` counts calls in the whole `Describe` by default - always pass `-Scope It`.
 - The end-to-end test opens the popup by pressing the test hotkey for real (while its own window is in front): a
   posted `WM_HOTKEY` does not give psclip the right to take the foreground, which forces the fallback above.
-- `git commit -F -` from PowerShell: set `$OutputEncoding = [Text.UTF8Encoding]::new($false)` first, otherwise the
-  message may start with a byte order mark.
+- Commit messages from PowerShell: write them to a temporary file with `[IO.File]::WriteAllText($path, $message,
+  [Text.UTF8Encoding]::new($false))` and use `git commit -F $path`. Piping to `git commit -F -` adds a byte order
+  mark to the subject (even with `$OutputEncoding` set), and `-m` mangles double quotes.
 
 ## Style
 

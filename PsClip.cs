@@ -5,6 +5,8 @@ using System;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text;
@@ -95,13 +97,17 @@ namespace PsClip
         }
     }
 
-    // One history entry: the plain text plus the formatting it was copied with.
+    // One history entry: a text with the formatting it was copied with - or an image.
     public sealed class ClipEntry
     {
-        public string Text;
-        public string Html;   // "HTML Format" (CF_HTML), or null
-        public string Rtf;    // Rich Text Format, or null
+        public string Text;          // null for images
+        public string Html;          // "HTML Format" (CF_HTML), or null
+        public string Rtf;           // Rich Text Format, or null
+        public byte[] Png;           // images: the image, PNG-compressed (in memory only)
+        public int Width, Height;    // images: size in pixels
+        public Bitmap Thumbnail;     // images: small version for the list
         public DateTime Copied;
+        string imageHash;
 
         public ClipEntry(string text)
         {
@@ -109,20 +115,70 @@ namespace PsClip
             Copied = DateTime.Now;
         }
 
+        public static ClipEntry FromImage(Image image, int thumbnailHeight)
+        {
+            ClipEntry entry = new ClipEntry(null);
+            using (MemoryStream stream = new MemoryStream())
+            {
+                image.Save(stream, ImageFormat.Png);
+                entry.Png = stream.ToArray();
+            }
+            entry.Width = image.Width;
+            entry.Height = image.Height;
+            using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
+            {
+                entry.imageHash = Convert.ToBase64String(sha.ComputeHash(entry.Png));
+            }
+            entry.Thumbnail = CreateThumbnail(image, thumbnailHeight);
+            return entry;
+        }
+
+        public bool IsImage
+        {
+            get { return Png != null; }
+        }
+
         public bool HasFormatting
         {
             get { return Html != null || Rtf != null; }
         }
 
-        // The same entry for the history: equal text. The formatting may differ - the newer copy wins.
+        // The same entry for the history: equal text (the formatting may differ - the newer copy
+        // wins), or the same image.
         public bool SameContent(ClipEntry other)
         {
-            return other != null && string.Equals(Text, other.Text, StringComparison.Ordinal);
+            if (other == null) return false;
+            if (IsImage || other.IsImage) return IsImage && other.IsImage && imageHash == other.imageHash;
+            return string.Equals(Text, other.Text, StringComparison.Ordinal);
+        }
+
+        // A new bitmap of the image (the caller owns it).
+        public Bitmap ToBitmap()
+        {
+            using (MemoryStream stream = new MemoryStream(Png))
+            using (Image image = Image.FromStream(stream))
+            {
+                return new Bitmap(image);   // a copy: FromStream needs its stream as long as the image lives
+            }
+        }
+
+        static Bitmap CreateThumbnail(Image image, int height)
+        {
+            double scale = Math.Min(1.0, Math.Min((double)height / image.Height, 3.0 * height / image.Width));
+            int width = Math.Max(1, (int)Math.Round(image.Width * scale));
+            int thumbnailHeight = Math.Max(1, (int)Math.Round(image.Height * scale));
+            Bitmap thumbnail = new Bitmap(width, thumbnailHeight);
+            using (Graphics graphics = Graphics.FromImage(thumbnail))
+            {
+                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                graphics.DrawImage(image, 0, 0, width, thumbnailHeight);
+            }
+            return thumbnail;
         }
 
         public override string ToString()
         {
-            return Text;
+            return IsImage ? "Image " + Width + " x " + Height : Text;
         }
     }
 

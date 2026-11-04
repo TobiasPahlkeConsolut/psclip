@@ -4,8 +4,8 @@
 
 .DESCRIPTION
     Records every text that is copied to the clipboard - with its formatting (HTML, RTF) - and
-    keeps the most recent entries in memory. Nothing is ever written to disk: the history
-    (pinned entries included) is gone when the script exits.
+    every image (e.g. screenshots), and keeps the most recent entries in memory. Nothing is ever
+    written to disk: the history (pinned entries included) is gone when the script exits.
 
     Press the hotkey (see -Hotkey) to open the history next to the mouse cursor:
 
@@ -45,6 +45,10 @@
 
 .PARAMETER MaxEntryLength
     Texts with more characters than this are not recorded (default 1,000,000).
+
+.PARAMETER MaxImages
+    Number of unpinned images to keep (default 20) - images need much more memory than text.
+    0 = do not record images.
 
 .PARAMETER Theme
     Dark (default), Light, or Auto to follow the Windows app theme (checked each time the popup
@@ -95,6 +99,9 @@ param(
 
     [ValidateRange(1, 100000000)]
     [int]$MaxEntryLength = 1000000,
+
+    [ValidateRange(0, 1000)]
+    [int]$MaxImages = 20,
 
     [ValidateSet('Dark', 'Light', 'Auto')]
     [string]$Theme = 'Dark',
@@ -161,6 +168,10 @@ $PopupSizes = @{
     M = [Size]::new(560, 360)
     L = [Size]::new(620, 540)
 }
+
+# Images larger than this are not recorded
+$MaxImageBytes = 50MB            # PNG offered on the clipboard
+$MaxImagePixels = 100000000      # 100 megapixels
 
 # RegisterHotKey modifier flags
 $HotkeyModifiers = @{ Alt = 0x1; Ctrl = 0x2; Control = 0x2; Shift = 0x4; Win = 0x8; Windows = 0x8 }
@@ -479,8 +490,8 @@ function New-FlatButton {
 #region Clipboard and history
 
 function Read-ClipboardEntry {
-    # The clipboard as a history entry - text plus HTML/RTF formatting - or $null if there is no
-    # text or the source app marked the content as private.
+    # The clipboard as a history entry - text plus HTML/RTF formatting, or an image - or $null if
+    # there is neither or the source app marked the content as private.
     param($Data = [Clipboard]::GetDataObject())
 
     if ($null -eq $Data) { return $null }
@@ -497,7 +508,11 @@ function Read-ClipboardEntry {
         Write-Verbose 'Ignored clipboard content excluded from clipboard history.'
         return $null
     }
-    if (-not $Data.GetDataPresent([DataFormats]::UnicodeText)) { return $null }
+    # Text wins over an image: e.g. Excel offers copied cells as text and as a picture.
+    if (-not $Data.GetDataPresent([DataFormats]::UnicodeText)) {
+        if ($MaxImages -eq 0) { return $null }
+        return Read-ClipboardImage $Data
+    }
 
     $entry = [PsClip.ClipEntry]::new([string]$Data.GetData([DataFormats]::UnicodeText))
     # WinForms reads HTML and RTF as plain strings (no deserialization). Formatting larger than
@@ -509,6 +524,38 @@ function Read-ClipboardEntry {
         if ($value -and $value.Length -le $MaxEntryLength) { $entry.$format = $value }
     }
     $entry
+}
+
+function Read-ClipboardImage {
+    # An image entry, or $null. Prefers the "PNG" format (keeps transparency) - a custom format, so
+    # it is read as raw bytes - and falls back to the standard bitmap.
+    param($Data)
+
+    $image = $null
+    $png = [PsClip.Native]::ReadFormatBytes($Data, 'PNG', $MaxImageBytes)
+    if ($null -ne $png) {
+        try {
+            $image = [Image]::FromStream([System.IO.MemoryStream]::new($png))
+        }
+        catch {
+            $image = $null   # not a valid PNG - try the bitmap
+        }
+    }
+    if ($null -eq $image -and $Data.GetDataPresent([DataFormats]::Bitmap)) {
+        $image = $Data.GetData([DataFormats]::Bitmap) -as [Image]
+    }
+    if ($null -eq $image) { return $null }
+
+    try {
+        if ($image.Width * $image.Height -gt $MaxImagePixels) {
+            Write-Verbose "Skipped image of $($image.Width) x $($image.Height) pixels."
+            return $null
+        }
+        return [PsClip.ClipEntry]::FromImage($image, $Ui.ThumbnailHeight)
+    }
+    finally {
+        $image.Dispose()
+    }
 }
 
 function Receive-ClipboardChange {
@@ -537,10 +584,13 @@ function Receive-ClipboardChange {
 function Add-ClipboardEntry {
     param([PsClip.ClipEntry]$Entry)
 
-    if ($null -eq $Entry -or [string]::IsNullOrWhiteSpace($Entry.Text)) { return }
-    if ($Entry.Text.Length -gt $MaxEntryLength) {
-        Write-Verbose "Skipped entry with $($Entry.Text.Length) chars (MaxEntryLength $MaxEntryLength)."
-        return
+    if ($null -eq $Entry) { return }
+    if (-not $Entry.IsImage) {
+        if ([string]::IsNullOrWhiteSpace($Entry.Text)) { return }
+        if ($Entry.Text.Length -gt $MaxEntryLength) {
+            Write-Verbose "Skipped entry with $($Entry.Text.Length) chars (MaxEntryLength $MaxEntryLength)."
+            return
+        }
     }
 
     # A re-copied entry replaces the old one (the newer formatting wins): pinned entries keep
@@ -555,8 +605,16 @@ function Add-ClipboardEntry {
     $State.History.Insert(0, $Entry)
     Limit-ClipboardHistory
 
-    $formats = if ($Entry.HasFormatting) { ' with formatting' } else { '' }
-    Write-Verbose "Recorded entry ($($Entry.Text.Length) chars$formats); $($State.History.Count) entries in history."
+    $what = if ($Entry.IsImage) {
+        "image $($Entry.Width) x $($Entry.Height), $([int]($Entry.Png.Length / 1KB)) KB"
+    }
+    elseif ($Entry.HasFormatting) {
+        "$($Entry.Text.Length) chars with formatting"
+    }
+    else {
+        "$($Entry.Text.Length) chars"
+    }
+    Write-Verbose "Recorded entry ($what); $($State.History.Count) entries in history."
 }
 
 function Find-ClipboardEntry {
@@ -603,6 +661,12 @@ function New-ClipboardData {
     param([PsClip.ClipEntry]$Entry, [switch]$PlainText)
 
     $data = [DataObject]::new()
+    if ($Entry.IsImage) {
+        # The bitmap for every program, plus the PNG for those that prefer it (keeps transparency).
+        $data.SetImage($Entry.ToBitmap())
+        $data.SetData('PNG', $false, [System.IO.MemoryStream]::new($Entry.Png))
+        return $data
+    }
     $data.SetText($Entry.Text, [TextDataFormat]::UnicodeText)
     if (-not $PlainText) {
         if ($Entry.Html) { $data.SetData([DataFormats]::Html, $Entry.Html) }
@@ -621,6 +685,20 @@ function Set-ClipboardEntry {
 function Limit-ClipboardHistory {
     while ($State.History.Count -gt $MaxItems) {
         $State.History.RemoveAt($State.History.Count - 1)
+    }
+
+    # Images need much more memory than text: keep only the newest MaxImages of them.
+    $images = 0
+    $index = 0
+    while ($index -lt $State.History.Count) {
+        if ($State.History[$index].IsImage) {
+            $images++
+            if ($images -gt $MaxImages) {
+                $State.History.RemoveAt($index)
+                continue
+            }
+        }
+        $index++
     }
 }
 
@@ -711,11 +789,11 @@ function Update-PopupList {
     $terms = $Ui.Search.Text.Split([char[]]@(' ', "`t"), [StringSplitOptions]::RemoveEmptyEntries)
     $found = [List[PsClip.ClipEntry]]::new()
     foreach ($entry in $State.Pinned) {
-        if (Test-FilterMatch $entry.Text $terms) { $found.Add($entry) }
+        if (Test-FilterMatch (Get-EntrySearchText $entry) $terms) { $found.Add($entry) }
     }
     $pinnedCount = $found.Count
     foreach ($entry in $State.History) {
-        if (Test-FilterMatch $entry.Text $terms) { $found.Add($entry) }
+        if (Test-FilterMatch (Get-EntrySearchText $entry) $terms) { $found.Add($entry) }
     }
     $State.Filtered = $found
     $State.FilteredPinnedCount = $pinnedCount
@@ -724,7 +802,7 @@ function Update-PopupList {
     $list.BeginUpdate()
     $list.Items.Clear()
     foreach ($entry in $found) {
-        [void]$list.Items.Add((Format-Preview $entry.Text))
+        [void]$list.Items.Add((Get-EntryPreview $entry))
     }
     $list.EndUpdate()
     if ($found.Count -gt 0) {
@@ -756,6 +834,22 @@ function Test-FilterMatch {
         if ($Text.IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
     }
     return $true
+}
+
+function Get-EntrySearchText {
+    # What the filter searches: the text, or for an image the word "image".
+    param([PsClip.ClipEntry]$Entry)
+
+    if ($Entry.IsImage) { return 'image' }
+    $Entry.Text
+}
+
+function Get-EntryPreview {
+    # The line shown in the list.
+    param([PsClip.ClipEntry]$Entry)
+
+    if ($Entry.IsImage) { return "Image $($Entry.Width) $([char]0xD7) $($Entry.Height)" }
+    Format-Preview $Entry.Text
 }
 
 function Format-Preview {
@@ -910,9 +1004,17 @@ function Write-ListItem {
         }
     }
 
-    $textBounds = [Rectangle]::new(
-        $bounds.X + $Ui.PinColumn, $bounds.Y,
-        $bounds.Width - $Ui.PinColumn - $Ui.Padding, $bounds.Height)
+    # Images: the thumbnail in front of the text
+    $textLeft = $bounds.X + $Ui.PinColumn
+    $entry = if ($index -lt $State.Filtered.Count) { $State.Filtered[$index] } else { $null }
+    if ($null -ne $entry -and $entry.IsImage -and $null -ne $entry.Thumbnail) {
+        $thumbnail = $entry.Thumbnail
+        $thumbnailTop = $bounds.Y + [int](($bounds.Height - $thumbnail.Height) / 2)
+        $graphics.DrawImage($thumbnail, $textLeft, $thumbnailTop, $thumbnail.Width, $thumbnail.Height)
+        $textLeft += $thumbnail.Width + $Ui.Padding
+    }
+
+    $textBounds = [Rectangle]::new($textLeft, $bounds.Y, $bounds.Right - $textLeft - $Ui.Padding, $bounds.Height)
     $textColor = if ($isSelected) { $colors.SelText } else { $colors.Text }
     $text = [string]$Ui.List.Items[$index]
     [TextRenderer]::DrawText($graphics, $text, $DrawEvent.Font, $textBounds, $textColor, $EntryTextFlags)
@@ -1075,6 +1177,7 @@ function New-PopupWindow {
     $list.BorderStyle = 'None'
     $list.DrawMode = 'OwnerDrawFixed'
     $list.ItemHeight = $Ui.Font.Height + [int](10 * $scale)
+    $Ui.ThumbnailHeight = $list.ItemHeight - [int](6 * $scale)
     $list.ContextMenuStrip = New-ListMenu
 
     $status = [Label]::new()

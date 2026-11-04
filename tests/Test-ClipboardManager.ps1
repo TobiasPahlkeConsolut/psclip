@@ -594,6 +594,34 @@ try {
     Add-Result 'A plain paste keeps the stored formatting' ($pastes.'formatted again'.Bold) `
         "bold: $($pastes.'formatted again'.Bold)"
 
+    # --- images: listed with their size, found by "image", pasted back ---
+    $testImage = [System.Drawing.Bitmap]::new(400, 100)
+    $graphics = [System.Drawing.Graphics]::FromImage($testImage)
+    $graphics.Clear([System.Drawing.Color]::White)
+    $graphics.DrawString('psclip test image 4711', [System.Drawing.Font]::new('Segoe UI', 20), [System.Drawing.Brushes]::Black, 10, 25)
+    $graphics.Dispose()
+    [Clipboard]::SetImage($testImage)
+    Wait-Milliseconds 600
+
+    $targetBox.Clear()
+    $imageItem = ''
+    $imageFound = $imagePasted = $false
+    if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
+        $imageItem = @([TestNative]::ListBoxItems($listBox))[1]   # below the pinned entry
+        foreach ($char in 'image'.ToCharArray()) {
+            [void][TestNative]::PostMessage($searchBox, [TestNative]::WM_CHAR, [IntPtr][int]$char, [IntPtr]::Zero)
+        }
+        Wait-Milliseconds 300
+        $items = @([TestNative]::ListBoxItems($listBox))
+        $imageFound = $items.Count -eq 1 -and $items[0] -like 'Image *'
+        Save-WindowImage $popup "popup-image-$Theme.png"
+        Send-PostedKey $searchBox $keyEnter
+        $imagePasted = Wait-Until { $targetBox.Rtf -match '\\pict|\\objattph|\\object' }
+    }
+    Add-Result 'A copied image is listed with its size' ($imageItem -like 'Image 400 * 100') $imageItem
+    Add-Result 'The filter "image" finds it' $imageFound
+    Add-Result 'Enter pastes the image' $imagePasted
+
     # --- popup size: medium by default, manual resizing is reset on the next opening ---
     $mediumHeight = [int](360 * $scale)
     $openedHeight = $resizedHeight = $reopenedHeight = -1
