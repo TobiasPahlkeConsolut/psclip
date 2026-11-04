@@ -6,10 +6,10 @@
     Starts the clipboard manager in a background process and drives it with window messages
     and real keystrokes: clipboard capture, de-duplication, private content, popup, filter,
     pinning, pasting into another window, popup size, the tray menu (window size, hotkey
-    dialog, dark mode) and graceful shutdown.
+    dialog, dark mode, keep awake) and graceful shutdown.
 
-    The test briefly opens windows and sends key presses - do not type or click while it runs
-    (about 30 seconds). Real keystrokes are only sent after checking that the expected window
+    The test briefly opens windows and sends key presses - do not type, click or move the mouse
+    while it runs (about 45 seconds). Real keystrokes are only sent after checking that the expected window
     is in the foreground. The clipboard text is saved before and restored afterwards.
 
     Screenshots of the popup, the tray menu and the hotkey dialog are written to
@@ -114,6 +114,20 @@ public static class TestNative
         if (DwmGetWindowAttribute(hwnd, 9, out rect, Marshal.SizeOf(typeof(Rect))) != 0)
             GetWindowRect(hwnd, out rect);
         return rect;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    struct LastInputInfo { public uint Size, Time; }
+
+    [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInputInfo info);
+
+    // Milliseconds since the last mouse or keyboard input in this session (synthetic input counts too)
+    public static int IdleMilliseconds()
+    {
+        LastInputInfo info = new LastInputInfo();
+        info.Size = (uint)Marshal.SizeOf(info);
+        GetLastInputInfo(ref info);
+        return (int)unchecked((uint)Environment.TickCount - info.Time);
     }
 
     public static int ClientHeightOf(IntPtr hwnd)
@@ -330,6 +344,20 @@ function Send-MenuKeys {
     return $true
 }
 
+function Measure-MaxIdle {
+    # Longest time without input (as Windows counts it) during the given period, in ms.
+    param([int]$Milliseconds)
+
+    $longest = 0
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while ($watch.ElapsedMilliseconds -lt $Milliseconds) {
+        [Application]::DoEvents()
+        $longest = [Math]::Max($longest, [TestNative]::IdleMilliseconds())
+        Start-Sleep -Milliseconds 100
+    }
+    $longest
+}
+
 function Save-MenuImages {
     param([string]$Name)
 
@@ -348,6 +376,7 @@ $keyDown = 0x28
 $keyUp = 0x26
 $keyRight = 0x27
 $keyEnter = 0x0D
+$keepAwakeSeconds = 2   # short, so that the keep-awake step takes seconds instead of minutes
 
 [void][TestNative]::SetProcessDPIAware()
 $screen = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
@@ -363,7 +392,8 @@ $savedClipboard = Get-Clipboard -Raw
 Set-Clipboard -Value 'initial entry'
 $manager = Start-Process powershell.exe -NoNewWindow -PassThru `
     -RedirectStandardOutput $log -RedirectStandardError $errorLog `
-    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"", '-Theme', $Theme, '-Verbose'
+    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"", '-Theme', $Theme,
+    '-KeepAwakeSeconds', $keepAwakeSeconds, '-Verbose'
 
 # The window the popup pastes into
 $target = [Form]::new()
@@ -534,6 +564,22 @@ try {
     $isLight = { param($brightness) $brightness -gt 150 }
     $switched = if ($Theme -eq 'Dark') { (& $isDark $before) -and (& $isLight $after) } else { (& $isLight $before) -and (& $isDark $after) }
     Add-Result 'Tray menu: dark mode switches the theme' $switched "brightness before $before, after $after"
+
+    # --- tray menu: Keep awake (presses Pause after $keepAwakeSeconds s without input) ---
+    $keepAwakeItem = @($keyDown) * 6 + $keyEnter   # 6x Down -> Keep awake
+    $idleOn = $idleOff = -1
+    if ((Open-TrayMenu) -and (Send-MenuKeys $keepAwakeItem)) {
+        $idleOn = Measure-MaxIdle 6000
+        if ((Open-TrayMenu) -and (Send-MenuKeys $keepAwakeItem)) {
+            $idleOff = Measure-MaxIdle 5500
+        }
+    }
+    # On: the idle time never gets much beyond the limit (checked every second).
+    # Off: it keeps growing for the whole measuring time.
+    $limit = $keepAwakeSeconds * 1000
+    Add-Result 'Tray menu: keep awake prevents idle time' ($idleOn -ge 0 -and $idleOn -lt $limit + 1800) `
+        "longest idle $idleOn ms, limit $limit ms"
+    Add-Result 'Keep awake can be switched off again' ($idleOff -gt $limit + 2500) "longest idle $idleOff ms"
 }
 finally {
     $target.Dispose()

@@ -1,11 +1,7 @@
 # psclip
 
-> [!IMPORTANT]
-> **For consolut internal use only.** psclip is an internal tool. Do not distribute, publish or share it outside
-> consolut. See [Internal use](#internal-use).
-
 A small clipboard history for Windows, inspired by [Ditto](https://ditto-cp.sourceforge.io/) but much simpler:
-one PowerShell script, no extra software, no admin rights - and **nothing is ever written to disk**.
+a PowerShell script, no extra software, no admin rights - and **nothing is ever written to disk**.
 The history lives in memory only and is gone when the script exits.
 
 <p>
@@ -23,6 +19,8 @@ The history lives in memory only and is gone when the script exits.
 - **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
 - **Configurable hotkey** - as a parameter or at runtime from the tray menu
 - Skips content that password managers mark as private
+- **Keep awake** (optional, unrelated to the clipboard): presses the Pause key when you have been idle for 30 seconds,
+  so Windows does not consider the session idle
 - Tray icon with menu; single instance per user
 
 ## Requirements
@@ -40,19 +38,24 @@ cd psclip
 .\Install.ps1 -Autostart
 ```
 
-`Install.ps1` creates a **Clipboard Manager** shortcut in the Start menu, with `-Autostart` a second one in your
-Startup folder (`shell:startup`), and starts the manager. Leave out `-Autostart` if you want to start it yourself.
-Nothing is copied - the shortcuts point to the script in this folder, so keep the folder where it is (or run
-`Install.ps1` again after moving it).
+What `Install.ps1` does - and doesn't:
+
+- It **does not copy anything**. psclip runs from the folder you cloned it to; keep that folder (or run
+  `Install.ps1` again after moving it).
+- It creates a **Clipboard Manager** shortcut in your Start menu
+  (`%APPDATA%\Microsoft\Windows\Start Menu\Programs`), so you can start psclip like any app.
+- With `-Autostart` it creates the same shortcut in your Startup folder (`shell:startup`), so psclip starts when you
+  sign in. Without `-Autostart`, an existing autostart shortcut is removed.
+- It starts psclip right away (and restarts a running instance, so new settings apply).
+- Everything is per user: no admin rights, no registry entries, no services.
 
 Settings are passed on to the shortcuts:
 
 ```powershell
-.\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L -MaxItems 500
+.\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L -KeepAwake
 ```
 
-Running `Install.ps1` again replaces the shortcuts and restarts a running instance, so this is also how you change
-settings permanently.
+Running `Install.ps1` again replaces the shortcuts, so this is also how you change settings permanently.
 
 ### Execution policy (only if needed)
 
@@ -64,8 +67,8 @@ are. Only if Windows refuses to run the scripts:
 - **Stricter policy** (`Restricted`, `AllSigned`): bypass it for this one call - it does not change your settings:
   `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart`
 
-The shortcuts always start the manager with `-ExecutionPolicy Bypass` (for that process only), so autostart works
-either way.
+The shortcuts always start psclip with `-ExecutionPolicy Bypass` (for that process only), so autostart works either
+way.
 
 ## Run without installing
 
@@ -113,21 +116,31 @@ The **tray icon** (a small blue clipboard, possibly in the `^` overflow area of 
   - *Change hotkey* - press the new combination
   - *Dark mode* - on / off
   - *Window size* - Small, Medium, Large
+  - *Keep awake* - on / off (off by default)
   - *Exit*
 
-Settings changed in the tray menu last until the manager exits (nothing is saved). To keep them, pass them to
+Settings changed in the tray menu last until psclip exits (nothing is saved). To keep them, pass them to
 `Install.ps1` (see [Options](#options)).
 
 <br clear="right">
 
+### Keep awake
+
+Has nothing to do with the clipboard - it replaces a separate "mouse mover" tool. When switched on, psclip checks
+every second how long there has been no mouse or keyboard input; after 30 seconds (`-KeepAwakeSeconds`) it presses
+the **Pause** key, which hardly any program reacts to. Windows then never sees the session as idle. While you are
+working, nothing is sent.
+
 ## Options
 
-| Parameter   | Default  | Description                                                                         |
-| ----------- | -------- | ----------------------------------------------------------------------------------- |
-| `-Hotkey`   | `Ctrl+Ö` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
-| `-Theme`    | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                            |
-| `-Size`     | `M`      | Popup size `S`, `M` or `L` - mostly the height (about 6, 10 or 17 entries visible)  |
-| `-MaxItems` | `200`    | Unpinned entries to keep                                                            |
+| Parameter           | Default  | Description                                                                 |
+| ------------------- | -------- | --------------------------------------------------------------------------- |
+| `-Hotkey`           | `Ctrl+Ö` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
+| `-Theme`            | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                    |
+| `-Size`             | `M`      | Popup size `S`, `M` or `L` - mostly the height (about 6, 10 or 17 entries visible) |
+| `-MaxItems`         | `200`    | Unpinned entries to keep                                                    |
+| `-KeepAwake`        | off      | Start with *Keep awake* switched on                                         |
+| `-KeepAwakeSeconds` | `30`     | Idle seconds before *Keep awake* presses Pause                              |
 
 The default hotkey is written as `Ctrl+Oemtilde` in the script (it must stay ASCII). It is the same physical key on
 every layout: `Ctrl+Ö` on a German keyboard, ``Ctrl+` `` on a US keyboard (Ditto's default). On German keyboards VS
@@ -145,10 +158,10 @@ This stops a running instance and removes both shortcuts. Then delete the folder
 
 ## In Task Manager
 
-The manager is a plain `powershell.exe` process: it is listed as **Windows PowerShell** under *Background
-processes* (started via the shortcut, below a *Console Window Host* / `conhost.exe`). To tell it apart from other
-PowerShell processes, open the *Details* tab, right-click a column header, *Select columns* and enable
-*Command line* - it shows `...ClipboardManager.ps1`.
+psclip is a plain `powershell.exe` process: it is listed as **Windows PowerShell** under *Background processes*
+(started via the shortcut, below a *Console Window Host* / `conhost.exe`). To tell it apart from other PowerShell
+processes, open the *Details* tab, right-click a column header, *Select columns* and enable *Command line* - it shows
+`...ClipboardManager.ps1`.
 
 ## Limitations
 
@@ -161,18 +174,28 @@ PowerShell processes, open the *Details* tab, right-click a column header, *Sele
 
 ## How it works
 
-`ClipboardManager.ps1` compiles a few lines of C# at startup (`Add-Type`) for the Windows APIs that PowerShell
-cannot call directly: a hidden window receives clipboard-change notifications (`AddClipboardFormatListener`) and
-the global hotkey (`RegisterHotKey`); pasting puts the entry on the clipboard, brings the previous window back to
-the front and sends `Ctrl+V`. The popup, tray icon and dialogs are Windows Forms. Everything else is PowerShell.
+| File                   | Content                                                                      |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| `ClipboardManager.ps1` | The app: clipboard history, popup, tray icon, hotkey, keep awake             |
+| `PsClip.cs`            | C# helpers for Windows APIs PowerShell cannot call directly                  |
+| `Install.ps1`          | Start menu / autostart shortcuts                                             |
+| `tests/`               | Unit tests and the end-to-end test                                           |
+
+At startup, `ClipboardManager.ps1` compiles `PsClip.cs` (`Add-Type`): a hidden window receives clipboard-change
+notifications (`AddClipboardFormatListener`) and the global hotkey (`RegisterHotKey`); pasting puts the entry on the
+clipboard, brings the previous window back to the front and sends `Ctrl+V`. The popup, tray icon and dialogs are
+Windows Forms. Everything else is PowerShell.
 
 ## Development
 
-See [AGENTS.md](AGENTS.md) for the conventions and pitfalls of this code base. The end-to-end test starts the
-manager and drives it on the real desktop (it opens windows and sends keystrokes for about 30 seconds - don't type
-meanwhile):
+See [AGENTS.md](AGENTS.md) for the conventions and pitfalls of this code base. There are two kinds of tests:
 
 ```powershell
+# Unit tests: a few seconds, invisible (Pester 3.4, which ships with Windows)
+.\tests\Invoke-UnitTests.ps1
+
+# End-to-end test: starts psclip and drives it on the real desktop - it opens windows and sends keystrokes for
+# about 45 seconds, so don't type, click or move the mouse meanwhile
 .\tests\Test-ClipboardManager.ps1 -Theme Dark
 .\tests\Test-ClipboardManager.ps1 -Theme Light
 ```

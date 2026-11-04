@@ -28,6 +28,12 @@
 .PARAMETER Size
     Passed on to ClipboardManager.ps1: popup size S, M (default) or L.
 
+.PARAMETER KeepAwake
+    Passed on to ClipboardManager.ps1: start with "Keep awake" switched on.
+
+.PARAMETER KeepAwakeSeconds
+    Passed on to ClipboardManager.ps1: idle seconds before "Keep awake" presses Pause (default 30).
+
 .PARAMETER Uninstall
     Stops a running instance and removes both shortcuts.
 
@@ -35,7 +41,7 @@
     .\Install.ps1 -Autostart
 
 .EXAMPLE
-    .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L
+    .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L -KeepAwake
 
 .EXAMPLE
     .\Install.ps1 -Uninstall
@@ -65,6 +71,13 @@ param(
     [Parameter(ParameterSetName = 'Install')]
     [ValidateSet('S', 'M', 'L')]
     [string]$Size,
+
+    [Parameter(ParameterSetName = 'Install')]
+    [switch]$KeepAwake,
+
+    [Parameter(ParameterSetName = 'Install')]
+    [ValidateRange(1, 3600)]
+    [int]$KeepAwakeSeconds,
 
     [Parameter(ParameterSetName = 'Uninstall', Mandatory)]
     [switch]$Uninstall
@@ -165,6 +178,8 @@ if ($PSBoundParameters.ContainsKey('Hotkey')) { $managerArguments += '-Hotkey', 
 if ($PSBoundParameters.ContainsKey('MaxItems')) { $managerArguments += '-MaxItems', $MaxItems }
 if ($PSBoundParameters.ContainsKey('Theme')) { $managerArguments += '-Theme', $Theme }
 if ($PSBoundParameters.ContainsKey('Size')) { $managerArguments += '-Size', $Size }
+if ($KeepAwake) { $managerArguments += '-KeepAwake' }
+if ($PSBoundParameters.ContainsKey('KeepAwakeSeconds')) { $managerArguments += '-KeepAwakeSeconds', $KeepAwakeSeconds }
 $shortcutArguments = (@('--headless', "`"$powershellExe`"") + $managerArguments) -join ' '
 
 New-Shortcut -Path $startMenuShortcut -Arguments $shortcutArguments
