@@ -76,6 +76,15 @@ Describe 'Get-ShortcutArguments' {
         $afterFile -join ' ' | Should BeExactly '-Hotkey Ctrl+\ -MaxItems 500 -MaxImages 0 -Theme Light -Preview -KeepAwake'
     }
 
+    It 'accepts the parameter dictionary of Install.ps1 ($PSBoundParameters), not just hashtables' {
+        $bound = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+        $bound['KeepAwake'] = [switch]$true
+        $bound['Size'] = 'L'
+        $parsed = [ArgvParser]::Split('conhost.exe ' + (Get-ShortcutArguments $bound))
+        $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
+        $afterFile -join ' ' | Should BeExactly '-Size L -KeepAwake'
+    }
+
     It 'leaves out settings that were not given' {
         Get-ShortcutArguments @{ Size = 'L' } | Should Not Match '-Theme|-Hotkey|-KeepAwake'
     }

@@ -157,14 +157,16 @@ function ConvertTo-CommandLineArgument {
 
 function Get-ShortcutArguments {
     # Command line of the shortcuts: conhost --headless powershell.exe ... -File ClipboardManager.ps1 <settings>
-    param([System.Collections.IDictionary]$Settings)   # $PSBoundParameters or a hashtable
+    # $PSBoundParameters (a Dictionary) or a hashtable. ContainsKey, not Contains: the Dictionary
+    # implements IDictionary.Contains only explicitly, so PowerShell cannot call it.
+    param([System.Collections.IDictionary]$Settings)
 
     $arguments = @('--headless', $powershellExe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managerScript)
     foreach ($name in 'Hotkey', 'MaxItems', 'MaxImages', 'Theme', 'Size', 'KeepAwakeSeconds') {
-        if ($Settings.Contains($name)) { $arguments += "-$name", [string]$Settings[$name] }
+        if ($Settings.ContainsKey($name)) { $arguments += "-$name", [string]$Settings[$name] }
     }
     foreach ($name in 'Preview', 'KeepAwake') {
-        if ($Settings.Contains($name) -and [bool]$Settings[$name]) { $arguments += "-$name" }
+        if ($Settings.ContainsKey($name) -and [bool]$Settings[$name]) { $arguments += "-$name" }
     }
 
     ($arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
