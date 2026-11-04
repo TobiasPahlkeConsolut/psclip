@@ -4,8 +4,10 @@
 
 .DESCRIPTION
     Records every text that is copied to the clipboard - with its formatting (HTML, RTF) - and
-    every image (e.g. screenshots), and keeps the most recent entries in memory. Nothing is ever
-    written to disk: the history (pinned entries included) is gone when the script exits.
+    every image (e.g. screenshots), and keeps the most recent entries in memory. Text in images
+    is recognized in the background (Windows' built-in OCR), so the filter finds images by their
+    content too. Nothing is ever written to disk: the history (pinned entries included) is gone
+    when the script exits.
 
     Press the hotkey (see -Hotkey) to open the history next to the mouse cursor:
 
@@ -603,17 +605,22 @@ function Add-ClipboardEntry {
         }
     }
 
-    # A re-copied entry replaces the old one (the newer formatting wins): pinned entries keep
-    # their place, others move to the top.
+    # A re-copied text replaces the old entry (the newer formatting wins). A re-copied image is
+    # identical: the old entry stays, with the text recognized in it (or being recognized).
+    # Pinned entries keep their place, others move to the top.
     $pinnedIndex = Find-ClipboardEntry $State.Pinned $Entry
     if ($pinnedIndex -ge 0) {
-        $State.Pinned[$pinnedIndex] = $Entry
+        if (-not $Entry.IsImage) { $State.Pinned[$pinnedIndex] = $Entry }
         return
     }
     $index = Find-ClipboardEntry $State.History $Entry
-    if ($index -ge 0) { $State.History.RemoveAt($index) }
+    if ($index -ge 0) {
+        if ($Entry.IsImage) { $Entry = $State.History[$index] }
+        $State.History.RemoveAt($index)
+    }
     $State.History.Insert(0, $Entry)
     Limit-ClipboardHistory
+    if ($Entry.IsImage) { Start-ImageOcr $Entry }
 
     $what = if ($Entry.IsImage) {
         "image $($Entry.Width) x $($Entry.Height), $([int]($Entry.Png.Length / 1KB)) KB"
@@ -799,11 +806,19 @@ function Update-Preview {
 
     $Ui.PreviewInfo.Text = Get-PreviewInfo $entry
     if ($entry.IsImage) {
+        # The image, and below it the text recognized in it
         $Ui.PreviewImage.Image = $entry.ToBitmap()
         $Ui.PreviewImage.Visible = $true
-        $Ui.PreviewText.Visible = $false
+        $hasText = -not [string]::IsNullOrEmpty($entry.OcrText)
+        if ($hasText) {
+            $Ui.PreviewText.Dock = 'Bottom'
+            $Ui.PreviewText.Height = [int]($Ui.Preview.Height * 0.3)
+            $Ui.PreviewText.Text = $entry.OcrText
+        }
+        $Ui.PreviewText.Visible = $hasText
     }
     else {
+        $Ui.PreviewText.Dock = 'Fill'
         $Ui.PreviewText.Text = Get-PreviewText $entry
         $Ui.PreviewText.Visible = $true
         $Ui.PreviewImage.Visible = $false
@@ -826,6 +841,12 @@ function Get-PreviewInfo {
     if ($Entry.IsImage) {
         $parts += "Image $($Entry.Width) $([char]0xD7) $($Entry.Height)"
         $parts += '{0:N0} KB' -f [Math]::Ceiling($Entry.Png.Length / 1KB)
+        if ($null -eq $Entry.OcrText) {
+            if ($Ui.ContainsKey('OcrEngine')) { $parts += 'reading text...' }
+        }
+        elseif ($Entry.OcrText -eq '') {
+            $parts += 'no text found'
+        }
     }
     else {
         $parts += '{0:N0} characters' -f $Entry.Text.Length
@@ -944,19 +965,21 @@ function Test-FilterMatch {
 }
 
 function Get-EntrySearchText {
-    # What the filter searches: the text, or for an image the word "image".
+    # What the filter searches: the text, or for an image the word "image" and the text recognized in it.
     param([PsClip.ClipEntry]$Entry)
 
-    if ($Entry.IsImage) { return 'image' }
+    if ($Entry.IsImage) { return "image $($Entry.OcrText)" }
     $Entry.Text
 }
 
 function Get-EntryPreview {
-    # The line shown in the list.
+    # The line shown in the list; for images their size and the start of the recognized text.
     param([PsClip.ClipEntry]$Entry)
 
-    if ($Entry.IsImage) { return "Image $($Entry.Width) $([char]0xD7) $($Entry.Height)" }
-    Format-Preview $Entry.Text
+    if (-not $Entry.IsImage) { return Format-Preview $Entry.Text }
+    $label = "Image $($Entry.Width) $([char]0xD7) $($Entry.Height)"
+    if ($Entry.OcrText) { $label += "  $([char]0xB7)  " + (Format-Preview $Entry.OcrText) }
+    $label
 }
 
 function Format-Preview {
@@ -1193,6 +1216,109 @@ function Switch-DarkMode {
 
 #endregion
 
+#region Text in images (OCR)
+
+function Initialize-Ocr {
+    # Windows' built-in, offline text recognition in the user's languages. Without it (no OCR
+    # language installed, Windows Server, ...) images are just not searchable by their text.
+    try {
+        Add-Type -AssemblyName System.Runtime.WindowsRuntime
+        $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime]
+        $null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Foundation, ContentType = WindowsRuntime]
+        $null = [Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType = WindowsRuntime]
+        $engine = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]::TryCreateFromUserProfileLanguages()
+    }
+    catch {
+        Write-Verbose "No text recognition: $($_.Exception.Message)"
+        return
+    }
+    if ($null -eq $engine) {
+        Write-Verbose 'No text recognition: no OCR language installed.'
+        return
+    }
+
+    # WinRT IAsyncOperation<T> -> .NET Task<T>: the generic AsTask overload
+    $Ui.AsTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+        $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+        $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+    } | Select-Object -First 1
+    $Ui.OcrEngine = $engine
+
+    $timer = [System.Windows.Forms.Timer]::new()
+    $timer.Interval = 50
+    $timer.add_Tick({ Step-Ocr })
+    $Ui.OcrTimer = $timer
+    Write-Verbose "Text recognition: $($engine.RecognizerLanguage.LanguageTag)."
+}
+
+function Start-ImageOcr {
+    # Queues an image for text recognition, unless its text is known or already being recognized.
+    param([PsClip.ClipEntry]$Entry)
+
+    if (-not $Ui.ContainsKey('OcrEngine') -or $null -ne $Entry.OcrText) { return }
+    if ($State.OcrQueue.Contains($Entry)) { return }
+    if ($null -ne $State.OcrJob -and [object]::ReferenceEquals($State.OcrJob.Entry, $Entry)) { return }
+    $State.OcrQueue.Enqueue($Entry)
+    $Ui.OcrTimer.Enabled = $true
+}
+
+function Step-Ocr {
+    # OCR timer tick. Recognition runs as WinRT tasks in the background; a tick only checks
+    # whether the current stage is done and starts the next one - decode the PNG, convert it,
+    # recognize the text - so nothing on the UI thread waits for it.
+    $job = $State.OcrJob
+    if ($null -eq $job) {
+        if ($State.OcrQueue.Count -eq 0) {
+            $Ui.OcrTimer.Enabled = $false
+            return
+        }
+        $entry = $State.OcrQueue.Dequeue()
+        $stream = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream([System.IO.MemoryStream]::new($entry.Png))
+        $State.OcrJob = @{
+            Entry = $entry
+            Stage = 'Decode'
+            Task  = Start-WinRtTask ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+        }
+        return
+    }
+    if (-not $job.Task.IsCompleted) { return }
+
+    $State.OcrJob = $null   # go on with the next image, also when this one failed
+    try {
+        if ($job.Task.IsFaulted -or $job.Task.IsCanceled) { throw $job.Task.Exception }
+        switch ($job.Stage) {
+            'Decode' {
+                $job.Task = Start-WinRtTask ($job.Task.Result.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+                $job.Stage = 'Convert'
+                $State.OcrJob = $job
+            }
+            'Convert' {
+                $job.Task = Start-WinRtTask ($Ui.OcrEngine.RecognizeAsync($job.Task.Result)) ([Windows.Media.Ocr.OcrResult])
+                $job.Stage = 'Recognize'
+                $State.OcrJob = $job
+            }
+            'Recognize' {
+                $job.Entry.OcrText = ($job.Task.Result.Lines | ForEach-Object { $_.Text }) -join "`r`n"
+                Write-Verbose "Text recognized in an image: $($job.Entry.OcrText.Length) chars."
+                if ($Ui.Form.Visible) {
+                    Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry (Get-SelectedEntry)
+                }
+            }
+        }
+    }
+    catch {
+        Write-Verbose "Text recognition failed for an image: $($_.Exception.Message)"
+        $job.Entry.OcrText = ''   # e.g. larger than OcrEngine.MaxImageDimension
+    }
+}
+
+function Start-WinRtTask {
+    param($Operation, [type]$ResultType)
+    $Ui.AsTask.MakeGenericMethod($ResultType).Invoke($null, @($Operation))
+}
+
+#endregion
+
 #region Keep awake (unrelated to the clipboard)
 
 function Initialize-KeepAwake {
@@ -1330,8 +1456,10 @@ function New-PopupWindow {
     $previewImage.SizeMode = 'Zoom'
     $previewImage.Visible = $false
 
-    $preview.Controls.Add($previewText)    # Fill controls first (docking runs in reverse order)
+    # Docking runs in reverse order: info at the top, then the text (Fill for text entries,
+    # Bottom below an image), then the image fills the rest.
     $preview.Controls.Add($previewImage)
+    $preview.Controls.Add($previewText)
     $preview.Controls.Add($previewInfo)
 
     # Docking is applied in reverse order: the Fill control has to be added first.
@@ -1584,6 +1712,8 @@ $State = @{
     PopupSize            = $Size                 # S, M or L; the tray menu changes it
     PreviewVisible       = $Preview.IsPresent    # F3 switches it
     KeepAwake            = $false                # the tray menu switches it
+    OcrQueue             = [Queue[PsClip.ClipEntry]]::new()   # images waiting for text recognition
+    OcrJob               = $null                 # the recognition in progress
     IsDark               = $null
     Colors               = $null
     Gdi                  = @{}                   # brushes and pens of the current theme
@@ -1599,6 +1729,7 @@ try {
     Set-Theme (Test-DarkTheme)
     Start-ClipboardListener
     Initialize-KeepAwake
+    Initialize-Ocr
 
     $hotkeyOk = Register-Hotkey $hotkeySpec
     try {
@@ -1624,6 +1755,7 @@ finally {
     # ContainsKey, not $Ui.Name: under StrictMode a missing key would throw here and hide the
     # error that stopped the startup.
     if ($Ui.ContainsKey('KeepAwakeTimer')) { $Ui.KeepAwakeTimer.Dispose() }
+    if ($Ui.ContainsKey('OcrTimer')) { $Ui.OcrTimer.Dispose() }
     if ($Ui.ContainsKey('Tray')) {
         $Ui.Tray.Visible = $false
         $Ui.Tray.Dispose()

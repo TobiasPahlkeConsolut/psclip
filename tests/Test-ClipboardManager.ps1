@@ -634,13 +634,23 @@ try {
     $graphics.DrawString('psclip test image 4711', [System.Drawing.Font]::new('Segoe UI', 20), [System.Drawing.Brushes]::Black, 10, 25)
     $graphics.Dispose()
     [Clipboard]::SetImage($testImage)
-    Wait-Milliseconds 600
+    # Text recognition runs in the background; the manager logs when it is done.
+    $recognized = Wait-Until { (Get-Content $log -Raw) -match 'Text recognized in an image' } 8000
 
     $targetBox.Clear()
     $imageItem = ''
-    $imageFound = $imagePasted = $false
+    $imageFound = $ocrFound = $imagePasted = $false
     if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
         $imageItem = @([TestNative]::ListBoxItems($listBox))[1]   # below the pinned entry
+
+        [TestNative]::SetText($searchBox, '4711')   # a word that only the image contains
+        Wait-Milliseconds 300
+        $items = @([TestNative]::ListBoxItems($listBox))
+        $ocrFound = $items.Count -eq 1 -and $items[0] -like 'Image *4711*'
+        Save-WindowImage $popup "popup-ocr-$Theme.png"
+        [TestNative]::SetText($searchBox, '')
+        Wait-Milliseconds 200
+
         foreach ($char in 'image'.ToCharArray()) {
             [void][TestNative]::PostMessage($searchBox, [TestNative]::WM_CHAR, [IntPtr][int]$char, [IntPtr]::Zero)
         }
@@ -651,7 +661,9 @@ try {
         Send-PostedKey $searchBox $keyEnter
         $imagePasted = Wait-Until { $targetBox.Rtf -match '\\pict|\\objattph|\\object' }
     }
-    Add-Result 'A copied image is listed with its size' ($imageItem -like 'Image 400 * 100') $imageItem
+    Add-Result 'A copied image is listed with its size' ($imageItem -like 'Image 400 * 100*') $imageItem
+    Add-Result 'Text in the image is recognized' ($recognized -and $imageItem -like '*4711*') $imageItem
+    Add-Result 'The filter finds the image by its text' $ocrFound
     Add-Result 'The filter "image" finds it' $imageFound
     Add-Result 'Enter pastes the image' $imagePasted
 

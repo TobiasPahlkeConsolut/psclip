@@ -41,7 +41,7 @@ See [README.md](README.md) for features and usage.
 ## Architecture of ClipboardManager.ps1
 
 Regions in order: help, `using`, `param`, Native helpers (loads `PsClip.cs`), Settings, Hotkey, Clipboard and
-history, Popup, Theme, Keep awake, Window construction, Main.
+history, Popup, Theme, Text in images (OCR), Keep awake, Window construction, Main.
 
 - **Dot-sourcing loads only the functions**: the first line of the Main region returns when
   `$MyInvocation.InvocationName -eq '.'`. The unit tests rely on this; keep all startup code below that guard.
@@ -60,7 +60,12 @@ history, Popup, Theme, Keep awake, Window construction, Main.
   pasting moves the same object to the top. `Limit-ClipboardHistory` caps all unpinned entries (`MaxItems`) and
   unpinned images (`MaxImages`).
 - Images are read from the "PNG" format (with `ReadFormatBytes` - it is a custom format) or the standard bitmap,
-  and only when the clipboard holds no text.
+  and only when the clipboard holds no text. A re-copied identical image keeps the existing entry (and its
+  recognized text); only texts are replaced.
+- OCR (`Windows.Media.Ocr` via WinRT, `Initialize-Ocr`): `Add-ClipboardEntry` queues new images
+  (`Start-ImageOcr`); a 50 ms timer (`Step-Ocr`) advances one job through decode -> convert -> recognize by checking
+  whether the current WinRT task (converted with `AsTask`) is done. Never `.Wait()` on these tasks on the UI thread.
+  `OcrText`: null = not yet recognized, `''` = no text. Without an OCR language `$Ui` has no `OcrEngine`.
 - `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
   `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,

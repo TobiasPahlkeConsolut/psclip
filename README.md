@@ -16,7 +16,9 @@ The history lives in memory only and is gone when the script exits.
   into the window you were working in
 - **Keeps the formatting** (HTML and RTF, e.g. from Word, Outlook or a browser): `Enter` pastes with formatting,
   `Shift+Enter` as plain text
-- **Images** too, e.g. screenshots: shown with a thumbnail, found by typing `image`; the last 20 are kept
+- **Images** too, e.g. screenshots: shown with a thumbnail; the last 20 are kept
+- **Search text in images**: the text in an image is recognized in the background (Windows' built-in OCR, offline),
+  so typing a word from a screenshot finds it; typing `image` lists all images
 - **Preview** (`F3`) of the selected entry below the list: the full text or the image
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"
 - **Dark mode** (default) or light mode, switchable from the tray menu
@@ -101,7 +103,7 @@ Press the hotkey anywhere. The popup opens at the mouse cursor:
 
 | Key                            | Action                                           |
 | ------------------------------ | ------------------------------------------------ |
-| *type*                         | Filter - every word must match, case-insensitive |
+| *type*                         | Filter - every word must match, case-insensitive; also searches the text in images |
 | `Up` / `Down`, `PgUp` / `PgDn` | Move the selection                               |
 | `Enter`, double-click          | Paste the entry into the window that was active, with its formatting |
 | `Shift+Enter`                  | Paste it as plain text                           |
@@ -185,6 +187,11 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 - **Text (with formatting) and images only.** Copied files are not recorded. When the clipboard holds both text and
   an image (e.g. Excel cells), psclip keeps the text. Texts longer than 1,000,000 characters (`-MaxEntryLength`) and
   images over 100 megapixels are skipped; formatting larger than the limit is dropped and the text kept.
+- **Text recognition** uses the OCR languages installed in Windows for your profile languages (e.g. English). It
+  works offline. Text in other languages is recognized less reliably (e.g. umlauts with English only); a German
+  OCR language can be added in Windows' language settings (*Time & language > Language & region*) or by an
+  administrator (`Add-WindowsCapability -Online -Name 'Language.OCR~~~de-DE~0.0.1.0'`). Without any OCR language,
+  images are still recorded, just not searchable by their text.
 - **In memory only** means psclip never writes the history anywhere. Windows itself may still move memory to the
   page file or into a crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is
@@ -204,7 +211,8 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 
 At startup, `ClipboardManager.ps1` compiles `PsClip.cs` (`Add-Type`): a hidden window receives clipboard-change
 notifications (`AddClipboardFormatListener`) and the global hotkey (`RegisterHotKey`). Each entry keeps the text plus
-its HTML and RTF formatting in memory, images are kept PNG-compressed. Pasting puts the entry back on the clipboard, brings the previous window to
+its HTML and RTF formatting in memory, images are kept PNG-compressed. Text in images is recognized with
+`Windows.Media.Ocr`, called through WinRT from PowerShell, in the background. Pasting puts the entry back on the clipboard, brings the previous window to
 the front and sends `Ctrl+V`. The popup, tray icon and dialogs are Windows Forms. Everything else is PowerShell.
 
 ## Development

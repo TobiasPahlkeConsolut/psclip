@@ -106,6 +106,7 @@ namespace PsClip
         public byte[] Png;           // images: the image, PNG-compressed (in memory only)
         public int Width, Height;    // images: size in pixels
         public Bitmap Thumbnail;     // images: small version for the list
+        public string OcrText;       // images: recognized text; null = not (yet) recognized, "" = none found
         public DateTime Copied;
         string imageHash;
 
