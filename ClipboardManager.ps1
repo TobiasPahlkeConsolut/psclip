@@ -7,7 +7,7 @@
     memory. Nothing is ever written to disk: the history (pinned entries included) is gone
     when the script exits.
 
-    Press the hotkey (default Ctrl+Shift+V) to open the history next to the mouse cursor:
+    Press the hotkey (see -Hotkey) to open the history next to the mouse cursor:
 
         type to filter        every word must match, case-insensitive
         Up/Down, PgUp/PgDn    move the selection
@@ -26,8 +26,11 @@
 
 .PARAMETER Hotkey
     Global hotkey, e.g. 'Ctrl+Shift+V', 'Ctrl+Alt+H' or 'Ctrl+F12'. The key part is a
-    System.Windows.Forms.Keys name (V, F12, Space, Oemtilde, 1, ...). It can also be changed
-    from the tray menu; that change lasts until the script exits.
+    System.Windows.Forms.Keys name (V, F12, Space, Oemtilde, 1, ...) or the character printed
+    on the key, such as an umlaut on a German keyboard. It can also be changed from the tray
+    menu; that change lasts until the script exits.
+
+    The default, Ctrl+Oemtilde, is Ctrl+O-umlaut on a German keyboard and Ctrl+` on a US one.
 
 .PARAMETER MaxItems
     Number of unpinned entries to keep; the oldest are dropped.
@@ -56,7 +59,7 @@ using namespace System.Windows.Forms
 
 [CmdletBinding()]
 param(
-    [string]$Hotkey = 'Ctrl+Shift+V',
+    [string]$Hotkey = 'Ctrl+Oemtilde',
 
     [ValidateRange(1, 100000)]
     [int]$MaxItems = 200,
@@ -211,6 +214,9 @@ namespace PsClip
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, string lParam);
 
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern short VkKeyScan(char ch);
+
         [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)]
         static extern int SetWindowTheme(IntPtr hwnd, string subAppName, string subIdList);
 
@@ -224,6 +230,21 @@ namespace PsClip
         public static bool IsKeyDown(int vk)
         {
             return (GetAsyncKeyState(vk) & 0x8000) != 0;
+        }
+
+        // Virtual key that types the character on the current keyboard layout (plain or with
+        // Shift), or -1 - e.g. VK_OEM_3 for the O-umlaut on a German layout.
+        public static int VirtualKeyOf(char ch)
+        {
+            short result = VkKeyScan(ch);
+            if (result == -1 || ((result >> 8) & 0xFF) > 1) return -1;   // none, or needs AltGr
+            return result & 0xFF;
+        }
+
+        // Character printed on the key on the current keyboard layout, or '\0' if it has none.
+        public static char CharacterOf(int vk)
+        {
+            return (char)(MapVirtualKey((uint)vk, 2 /* MAPVK_VK_TO_CHAR */) & 0xFFFF);
         }
 
         // SetForegroundWindow is often refused for background processes; attaching to the
@@ -353,18 +374,61 @@ function ConvertFrom-HotkeyText {
             continue
         }
         if ($null -ne $key) { throw "Hotkey '$Text' contains more than one key." }
-
-        $name = if ($part -match '^\d$') { "D$part" } else { $part }   # '1' -> Keys.D1
-        try {
-            $key = [Keys]$name
-        }
-        catch {
-            throw "Unknown key '$part' in hotkey '$Text'. Use a System.Windows.Forms.Keys name such as V, F12 or Space."
-        }
+        $key = ConvertTo-Key $part
     }
     if ($null -eq $key) { throw "Hotkey '$Text' has no key, only modifiers." }
 
     [pscustomobject]@{ Modifiers = [uint32]$modifiers; VirtualKey = [uint32]$key }
+}
+
+function ConvertTo-Key {
+    # 'V', 'F12', 'Oemtilde', '1' or the character printed on a key (e.g. an umlaut) -> [Keys]
+    param([string]$Name)
+
+    $keyName = if ($Name -match '^\d$') { "D$Name" } else { $Name }   # '1' -> Keys.D1
+    try {
+        $key = [Keys]$keyName
+        if ($key -ne [Keys]::None) { return $key }
+    }
+    catch {
+        # Not a [Keys] name - maybe a character.
+    }
+    if ($Name.Length -eq 1) {
+        $virtualKey = [PsClip.Native]::VirtualKeyOf($Name[0])
+        if ($virtualKey -ge 0) { return [Keys]$virtualKey }
+    }
+    throw "Unknown key '$Name'. Use a System.Windows.Forms.Keys name such as V, F12 or Space, or the character on the key."
+}
+
+function Get-KeyDisplayName {
+    # The character printed on OEM keys (an umlaut instead of 'Oemtilde' on a German keyboard),
+    # digits without the 'D', otherwise the [Keys] name.
+    param([Keys]$Key)
+
+    $name = [string]$Key
+    if ($name -match '^D\d$') { return $name.Substring(1) }
+    if ($name -like 'Oem*') {
+        $character = ([string][PsClip.Native]::CharacterOf([int]$Key)).ToUpper()
+        # Only if it maps back to the same key; '+' would clash with the separator.
+        if ($character.Length -eq 1 -and $character -ne "`0" -and $character -ne '+' -and
+            [PsClip.Native]::VirtualKeyOf($character[0]) -eq [int]$Key) {
+            return $character
+        }
+    }
+    return $name
+}
+
+function Format-HotkeyText {
+    # Normalized display text, e.g. 'ctrl+shift+v' -> 'Ctrl+Shift+V', 'Ctrl+Oemtilde' -> 'Ctrl+' + umlaut
+    param([string]$Text)
+
+    $spec = ConvertFrom-HotkeyText $Text
+    $parts = @()
+    foreach ($modifier in 'Ctrl', 'Alt', 'Shift', 'Win') {
+        if ($spec.Modifiers -band $HotkeyModifiers[$modifier]) { $parts += $modifier }
+    }
+    $parts += Get-KeyDisplayName ([Keys]$spec.VirtualKey)
+    $parts -join '+'
 }
 
 function ConvertTo-HotkeyText {
@@ -379,7 +443,7 @@ function ConvertTo-HotkeyText {
     if ($KeyEvent.Alt) { $parts += 'Alt' }
     if ($KeyEvent.Shift) { $parts += 'Shift' }
     if ([PsClip.Native]::IsKeyDown(0x5B) -or [PsClip.Native]::IsKeyDown(0x5C)) { $parts += 'Win' }
-    $parts += [string]$KeyEvent.KeyCode
+    $parts += Get-KeyDisplayName $KeyEvent.KeyCode
     $parts -join '+'
 }
 
@@ -390,7 +454,7 @@ function Register-Hotkey {
     $spec = ConvertFrom-HotkeyText $Text
     if (-not $Ui.ClipHost.SetHotkey($spec.Modifiers, $spec.VirtualKey)) { return $false }
 
-    $State.HotkeyText = $Text
+    $State.HotkeyText = Format-HotkeyText $Text
     $State.HotkeyActive = $true
     Write-Verbose "Hotkey $Text registered."
     return $true
@@ -1163,7 +1227,7 @@ $State = @{
     Filtered            = [List[string]]::new()   # entries currently shown in the popup
     FilteredPinnedCount = 0
     PasteTarget         = [IntPtr]::Zero          # window to paste into; zero = copy only
-    HotkeyText          = $Hotkey
+    HotkeyText          = Format-HotkeyText $Hotkey   # as shown to the user
     HotkeyActive        = $false
     IsDark              = $null
     Colors              = $null
@@ -1193,7 +1257,7 @@ try {
 
     if (-not $hotkeyOk) {
         $Ui.Tray.ShowBalloonTip(8000, 'Clipboard history',
-            "The hotkey $Hotkey is already used by another program. Right-click the tray icon and choose 'Change hotkey'.",
+            "The hotkey $($State.HotkeyText) is already used by another program. Right-click the tray icon and choose 'Change hotkey'.",
             'Warning')
     }
 

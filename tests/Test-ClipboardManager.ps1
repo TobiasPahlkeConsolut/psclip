@@ -86,6 +86,7 @@ public static class TestNative
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extraInfo);
+    [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
     [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo info);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect value, int size);
@@ -293,7 +294,7 @@ try {
     Add-Result 'Manager starts' $started
     if (-not $started) { throw "The manager did not start, see $errorLog" }
     $hostWindow = [TestNative]::FindWindow([NullString]::Value, 'PsClipboardManager')
-    Add-Result 'Hotkey Ctrl+Shift+V registered' (-not (Test-HotkeyFree 0x6 0x56))
+    Add-Result 'Default hotkey Ctrl+Oemtilde registered' (-not (Test-HotkeyFree 0x2 0xC0))
 
     # --- clipboard capture ---
     foreach ($text in 'alpha test entry', "beta line one`r`nline two", 'gamma & <special> chars', 'alpha test entry') {
@@ -392,6 +393,12 @@ try {
             if ($dialogShown) {
                 Wait-Milliseconds 200
                 Save-WindowImage $dialog "hotkey-dialog-$Theme.png"
+
+                # The default hotkey is shown with the character on the key (an umlaut on German keyboards).
+                $keyCharacter = ([string][char]([TestNative]::MapVirtualKey(0xC0, 2) -band 0xFFFF)).ToUpper()
+                $current = [TestNative]::TextOf([TestNative]::FocusOf($dialog))
+                Add-Result 'Dialog shows the current hotkey with the key character' ($current -eq "Ctrl+$keyCharacter") $current
+
                 [TestNative]::PressKeys(0x11, 0x12, 0x10, 0x78)   # Ctrl+Alt+Shift+F9
                 Wait-Milliseconds 300
                 $shown = [TestNative]::TextOf([TestNative]::FocusOf($dialog))
@@ -400,7 +407,7 @@ try {
                 [void](Wait-Until { -not [TestNative]::IsWindowVisible($dialog) })
 
                 $newTaken = -not (Test-HotkeyFree 0x7 0x78)
-                $oldFree = Test-HotkeyFree 0x6 0x56
+                $oldFree = Test-HotkeyFree 0x2 0xC0
                 Add-Result 'New hotkey registered, old one released' ($newTaken -and $oldFree) "new taken: $newTaken, old free: $oldFree"
                 $dialogDone = $true
             }

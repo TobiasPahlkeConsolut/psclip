@@ -12,7 +12,7 @@ The history lives in memory only and is gone when the script exits.
 ## Features
 
 - Records all text you copy, newest first (default: last 200 entries; copying an entry again moves it to the top)
-- **Hotkey popup** (default `Ctrl+Shift+V`) next to the mouse cursor: type to filter, `Enter` pastes into the window you were working in
+- **Hotkey popup** (default `Ctrl+Ö` on a German keyboard) next to the mouse cursor: type to filter, `Enter` pastes into the window you were working in
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"
 - **Light and dark mode**, following the Windows app theme
 - **Configurable hotkey** - as a parameter or at runtime from the tray menu
@@ -91,9 +91,13 @@ A hotkey changed from the tray menu lasts until the manager exits; use `Install.
 
 | Parameter   | Default        | Description                                                                      |
 | ----------- | -------------- | -------------------------------------------------------------------------------- |
-| `-Hotkey`   | `Ctrl+Shift+V` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key name (`V`, `F12`, `Space`, `Oemtilde`, `1`, ...) |
+| `-Hotkey`   | `Ctrl+Ö`       | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
 | `-MaxItems` | `200`          | Unpinned entries to keep                                                         |
 | `-Theme`    | `Auto`         | `Auto` (follow Windows), `Light` or `Dark`                                       |
+
+The default hotkey is written as `Ctrl+Oemtilde` in the script (it must stay ASCII). It is the same physical key on
+every layout: `Ctrl+Ö` on a German keyboard, ``Ctrl+` `` on a US keyboard (Ditto's default). On German keyboards VS
+Code uses `Ctrl+Ö` to toggle its terminal; the global hotkey takes precedence, so pick another one if you need that.
 
 `Get-Help .\ClipboardManager.ps1 -Full` shows the complete help.
 

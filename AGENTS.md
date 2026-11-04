@@ -23,7 +23,8 @@ little inline C#. See [README.md](README.md) for features and usage.
 - **C# in `Add-Type` is compiled as C# 5**: no string interpolation (`$"..."`), `?.`, `nameof`, expression-bodied
   members (`=>`), `out var`, tuples. Lambdas and anonymous delegates are fine.
 - **Source files must be pure ASCII.** PowerShell 5.1 reads BOM-less files as ANSI, so any non-ASCII character is
-  garbled. Write special characters as `[char]0x21B5` etc. Check with:
+  garbled. Write special characters as `[char]0x21B5` etc. (that is also why the default hotkey is
+  `Ctrl+Oemtilde`, not `Ctrl+` + O-umlaut; `Get-KeyDisplayName` shows the key's character to the user). Check with:
   `@([IO.File]::ReadAllBytes($path) | Where-Object { $_ -gt 127 }).Count` (must be 0).
 - **No new dependencies.** Only what ships with Windows (PowerShell 5.1, .NET Framework 4.x, WinForms). Never
   install software (no winget, no PSGallery modules) without asking.
