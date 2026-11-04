@@ -1,0 +1,3 @@
+# Windows-only project: check out text files with CRLF
+* text=auto eol=crlf
+*.png binary
