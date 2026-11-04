@@ -16,7 +16,9 @@ See [README.md](README.md) for features and usage.
 | `tests/Install.Tests.ps1`         | Unit tests of `Install.ps1` (never touches a running psclip)         |
 | `tests/Invoke-UnitTests.ps1`      | Runs all `*.Tests.ps1` with Pester 3/4                               |
 | `tests/Test-ClipboardManager.ps1` | End-to-end test on the real desktop                                  |
-| `docs/`                           | Screenshots for the README (produced by the end-to-end test)         |
+| `tests/New-DocsScreenshots.ps1`   | Takes the README screenshots (`docs/*.png`) with sample content      |
+| `tests/TestSupport.ps1`           | Window helpers shared by the two scripts above                       |
+| `docs/`                           | Screenshots for the README                                           |
 
 ## Hard constraints
 
