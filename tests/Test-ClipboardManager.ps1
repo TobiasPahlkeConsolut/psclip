@@ -4,19 +4,19 @@
 
 .DESCRIPTION
     Starts the clipboard manager in a background process and drives it with window messages
-    and a few real keystrokes: clipboard capture, de-duplication, private content, popup,
-    filter, pinning, pasting into another window, changing the hotkey via the tray menu and
-    graceful shutdown.
+    and real keystrokes: clipboard capture, de-duplication, private content, popup, filter,
+    pinning, pasting into another window, popup size, the tray menu (window size, hotkey
+    dialog, dark mode) and graceful shutdown.
 
     The test briefly opens windows and sends key presses - do not type or click while it runs
-    (about 20 seconds). Real keystrokes are only sent after checking that the expected window
+    (about 30 seconds). Real keystrokes are only sent after checking that the expected window
     is in the foreground. The clipboard text is saved before and restored afterwards.
 
     Screenshots of the popup, the tray menu and the hotkey dialog are written to
     -OutputDirectory, together with the manager's log.
 
 .PARAMETER Theme
-    Theme the manager is started with (the screenshots show it).
+    Theme the manager is started with (the screenshots show it; the test switches it once).
 
 .PARAMETER OutputDirectory
     Where logs and screenshots go.
@@ -80,15 +80,17 @@ public static class TestNative
     [DllImport("user32.dll")] public static extern bool AllowSetForegroundWindow(int processId);
     [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint vk);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
+    [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
     [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extraInfo);
-    [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
     [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo info);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
+    [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
     [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect value, int size);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr lParam);
@@ -112,6 +114,13 @@ public static class TestNative
         if (DwmGetWindowAttribute(hwnd, 9, out rect, Marshal.SizeOf(typeof(Rect))) != 0)
             GetWindowRect(hwnd, out rect);
         return rect;
+    }
+
+    public static int ClientHeightOf(IntPtr hwnd)
+    {
+        Rect rect;
+        GetClientRect(hwnd, out rect);
+        return rect.Bottom - rect.Top;
     }
 
     public static string TitleOf(IntPtr hwnd)
@@ -259,14 +268,92 @@ function Save-WindowImage {
     $bitmap.Dispose()
 }
 
+function Get-WindowBrightness {
+    # Brightness (0-255) of a point in the lower right of the popup, inside the empty list area.
+    param([IntPtr]$Window)
+
+    $rect = [TestNative]::RectOf($Window)
+    $bitmap = [System.Drawing.Bitmap]::new(1, 1)
+    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+    $graphics.CopyFromScreen($rect.Right - 40, $rect.Bottom - 80, 0, 0, [System.Drawing.Size]::new(1, 1))
+    $graphics.Dispose()
+    $brightness = [int]($bitmap.GetPixel(0, 0).GetBrightness() * 255)
+    $bitmap.Dispose()
+    $brightness
+}
+
 function Send-PostedKey {
     param([IntPtr]$Window, [int]$VirtualKey)
     [void][TestNative]::PostMessage($Window, [TestNative]::WM_KEYDOWN, [IntPtr]$VirtualKey, [IntPtr]::Zero)
 }
 
+function Show-TestPopup {
+    # Simulates the hotkey; returns $true once the popup is in the foreground.
+    if ([TestNative]::IsWindowVisible($popup)) { Hide-TestPopup }   # the hotkey toggles the popup
+    [void][TestNative]::PostMessage($hostWindow, [TestNative]::WM_HOTKEY, [IntPtr]1, [IntPtr]::Zero)
+    Wait-Until { [TestNative]::IsWindowVisible($popup) -and (Test-Foreground $popup) }
+}
+
+function Hide-TestPopup {
+    # Esc, with WM_CLOSE (which only hides the popup) as fallback so later steps start clean.
+    Send-PostedKey $searchBox 0x1B
+    if (Wait-Until { -not [TestNative]::IsWindowVisible($popup) } 1500) { return }
+    Write-Warning 'Esc did not hide the popup - hiding it with WM_CLOSE.'
+    [void][TestNative]::PostMessage($popup, [TestNative]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+    [void](Wait-Until { -not [TestNative]::IsWindowVisible($popup) })
+}
+
+function Open-TrayMenu {
+    # Right-clicks the tray icon via its callback message; $true once the menu has the foreground.
+    if (-not [TestNative]::Activate($target.Handle)) { return $false }
+    [void][TestNative]::AllowSetForegroundWindow($manager.Id)
+    foreach ($window in [TestNative]::TopLevelWindowsOf($manager.Id)) {
+        if ([TestNative]::TitleOf($window) -eq '') {   # the NotifyIcon's hidden window has no title
+            [void][TestNative]::PostMessage($window, [TestNative]::WM_TRAYMOUSEMESSAGE, [IntPtr]::Zero,
+                [IntPtr][TestNative]::WM_RBUTTONUP)
+        }
+    }
+    $open = Wait-Until { [TestNative]::ProcessOf([TestNative]::GetForegroundWindow()) -eq $manager.Id } 2000
+    if ($open) { Wait-Milliseconds 300 }
+    return $open
+}
+
+function Send-MenuKeys {
+    # Real key presses for the tray menu - each one only while the manager owns the foreground.
+    param([byte[]]$Keys)
+
+    foreach ($key in $Keys) {
+        if ([TestNative]::ProcessOf([TestNative]::GetForegroundWindow()) -ne $manager.Id) { return $false }
+        [TestNative]::PressKeys($key)
+        Wait-Milliseconds 100
+    }
+    return $true
+}
+
+function Save-MenuImages {
+    param([string]$Name)
+
+    $index = 0
+    foreach ($window in [TestNative]::TopLevelWindowsOf($manager.Id)) {
+        if ([TestNative]::IsWindowVisible($window) -and $window -ne $popup) {
+            $index++
+            Save-WindowImage $window "$Name-$index.png"
+        }
+    }
+}
+
 #endregion
 
+$keyDown = 0x28
+$keyUp = 0x26
+$keyRight = 0x27
+$keyEnter = 0x0D
+
 [void][TestNative]::SetProcessDPIAware()
+$screen = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
+$scale = $screen.DpiX / 96.0
+$screen.Dispose()
+
 $managerScript = (Resolve-Path (Join-Path $PSScriptRoot '..\ClipboardManager.ps1')).Path
 [void](New-Item -ItemType Directory -Force -Path $OutputDirectory)
 $log = Join-Path $OutputDirectory 'manager.log'
@@ -294,6 +381,7 @@ try {
     Add-Result 'Manager starts' $started
     if (-not $started) { throw "The manager did not start, see $errorLog" }
     $hostWindow = [TestNative]::FindWindow([NullString]::Value, 'PsClipboardManager')
+    $popup = [TestNative]::FindWindow([NullString]::Value, 'Clipboard history')
     Add-Result 'Default hotkey Ctrl+Oemtilde registered' (-not (Test-HotkeyFree 0x2 0xC0))
 
     # --- clipboard capture ---
@@ -318,9 +406,7 @@ try {
     if (-not [TestNative]::Activate($target.Handle)) { throw 'Could not bring the test window to the foreground.' }
     [void]$targetBox.Focus()
 
-    [void][TestNative]::PostMessage($hostWindow, [TestNative]::WM_HOTKEY, [IntPtr]1, [IntPtr]::Zero)
-    $popup = [TestNative]::FindWindow([NullString]::Value, 'Clipboard history')
-    $popupShown = Wait-Until { Test-Foreground $popup }
+    $popupShown = Show-TestPopup
     Add-Result 'Hotkey opens the popup in the foreground' $popupShown
     if (-not $popupShown) { throw 'The popup did not come to the foreground.' }
 
@@ -342,8 +428,8 @@ try {
     Wait-Milliseconds 200
 
     # --- pin (real Ctrl+P) ---
-    Send-PostedKey $searchBox 0x28   # Down
-    Send-PostedKey $searchBox 0x28   # Down -> 'beta'
+    Send-PostedKey $searchBox $keyDown
+    Send-PostedKey $searchBox $keyDown   # -> 'beta'
     Wait-Milliseconds 200
     if (Test-Foreground $popup) {
         [TestNative]::PressKeys(0x11, 0x50)   # Ctrl+P
@@ -357,65 +443,97 @@ try {
     }
 
     # --- paste into the previous window ---
-    Send-PostedKey $searchBox 0x28   # Down -> 'alpha' (below the pinned entry)
+    Send-PostedKey $searchBox $keyDown   # -> 'alpha' (below the pinned entry)
     Wait-Milliseconds 200
-    Send-PostedKey $searchBox 0x0D   # Enter
+    Send-PostedKey $searchBox $keyEnter
     $pasted = Wait-Until { $targetBox.Text -eq 'alpha test entry' }
     Add-Result 'Enter pastes into the previously active window' $pasted "target text: '$($targetBox.Text)'"
 
-    # --- change the hotkey via tray menu -> dialog (real keys) ---
-    $dialogDone = $false
-    if ([TestNative]::Activate($target.Handle)) {
-        [void][TestNative]::AllowSetForegroundWindow($manager.Id)
-        foreach ($window in [TestNative]::TopLevelWindowsOf($manager.Id)) {
-            if ([TestNative]::TitleOf($window) -eq '') {   # the NotifyIcon's hidden window has no title
-                [void][TestNative]::PostMessage($window, [TestNative]::WM_TRAYMOUSEMESSAGE, [IntPtr]::Zero, [IntPtr][TestNative]::WM_RBUTTONUP)
-            }
-        }
-        $menuOpen = Wait-Until { [TestNative]::ProcessOf([TestNative]::GetForegroundWindow()) -eq $manager.Id } 2000
-        if ($menuOpen) {
-            Wait-Milliseconds 300
-            $menuWindow = [TestNative]::TopLevelWindowsOf($manager.Id) |
-                Where-Object { [TestNative]::IsWindowVisible($_) -and $_ -ne $popup } |
-                Select-Object -First 1
-            if ($menuWindow) { Save-WindowImage $menuWindow "tray-menu-$Theme.png" }
-
-            [TestNative]::PressKeys(0x28)   # Down -> Show history
-            [TestNative]::PressKeys(0x28)   # Down -> Change hotkey...
-            [TestNative]::PressKeys(0x0D)   # Enter
-
-            $dialog = [IntPtr]::Zero
-            $dialogShown = Wait-Until {
-                $script:dialog = [TestNative]::FindWindow([NullString]::Value, 'Change hotkey')
-                $script:dialog -ne [IntPtr]::Zero -and (Test-Foreground $script:dialog)
-            }
-            Add-Result 'Tray menu opens the hotkey dialog' $dialogShown
-            if ($dialogShown) {
-                Wait-Milliseconds 200
-                Save-WindowImage $dialog "hotkey-dialog-$Theme.png"
-
-                # The default hotkey is shown with the character on the key (an umlaut on German keyboards).
-                $keyCharacter = ([string][char]([TestNative]::MapVirtualKey(0xC0, 2) -band 0xFFFF)).ToUpper()
-                $current = [TestNative]::TextOf([TestNative]::FocusOf($dialog))
-                Add-Result 'Dialog shows the current hotkey with the key character' ($current -eq "Ctrl+$keyCharacter") $current
-
-                [TestNative]::PressKeys(0x11, 0x12, 0x10, 0x78)   # Ctrl+Alt+Shift+F9
-                Wait-Milliseconds 300
-                $shown = [TestNative]::TextOf([TestNative]::FocusOf($dialog))
-                Add-Result 'Dialog shows the pressed combination' ($shown -eq 'Ctrl+Alt+Shift+F9') $shown
-                if (Test-Foreground $dialog) { [TestNative]::PressKeys(0x0D) }   # Enter = OK
-                [void](Wait-Until { -not [TestNative]::IsWindowVisible($dialog) })
-
-                $newTaken = -not (Test-HotkeyFree 0x7 0x78)
-                $oldFree = Test-HotkeyFree 0x2 0xC0
-                Add-Result 'New hotkey registered, old one released' ($newTaken -and $oldFree) "new taken: $newTaken, old free: $oldFree"
-                $dialogDone = $true
-            }
+    # --- popup size: medium by default, manual resizing is reset on the next opening ---
+    $mediumHeight = [int](360 * $scale)
+    $openedHeight = $resizedHeight = $reopenedHeight = -1
+    if (Show-TestPopup) {
+        $openedHeight = [TestNative]::ClientHeightOf($popup)
+        $outer = [TestNative]::RectOf($popup)
+        $noMoveNoZOrderNoActivate = 0x16
+        [void][TestNative]::SetWindowPos($popup, [IntPtr]::Zero, 0, 0,
+            $outer.Right - $outer.Left + 150, $outer.Bottom - $outer.Top + 150, $noMoveNoZOrderNoActivate)
+        Wait-Milliseconds 200
+        $resizedHeight = [TestNative]::ClientHeightOf($popup)
+        Hide-TestPopup
+        if (Show-TestPopup) {
+            $reopenedHeight = [TestNative]::ClientHeightOf($popup)
+            Hide-TestPopup
         }
     }
-    if (-not $dialogDone -and -not ($results | Where-Object Step -eq 'Tray menu opens the hotkey dialog')) {
-        Add-Result 'Tray menu opens the hotkey dialog' $false 'not run: could not open the tray menu in the foreground'
+    Add-Result 'Popup opens at the medium size' ($openedHeight -eq $mediumHeight) "client height $openedHeight, expected $mediumHeight"
+    Add-Result 'Manual resizing is reset on the next opening' ($resizedHeight -gt $openedHeight -and $reopenedHeight -eq $openedHeight) `
+        "resized $resizedHeight, reopened $reopenedHeight"
+
+    # --- tray menu: Window size > Large ---
+    $largeHeight = [int](540 * $scale)
+    $sizeChanged = $false
+    if ((Open-TrayMenu) -and (Send-MenuKeys $keyDown, $keyDown, $keyDown, $keyDown, $keyDown, $keyRight)) {
+        Wait-Milliseconds 300
+        Save-MenuImages "tray-menu-$Theme"
+        $sizeChanged = Send-MenuKeys $keyUp, $keyEnter   # Up wraps around to the last item, Large
     }
+    $openedHeight = -1
+    if ($sizeChanged -and (Show-TestPopup)) {
+        $openedHeight = [TestNative]::ClientHeightOf($popup)
+        Hide-TestPopup
+    }
+    Add-Result 'Tray menu: window size Large' ($openedHeight -eq $largeHeight) "client height $openedHeight, expected $largeHeight"
+
+    # --- tray menu: Change hotkey dialog ---
+    $dialog = [IntPtr]::Zero
+    $dialogShown = $false
+    if ((Open-TrayMenu) -and (Send-MenuKeys $keyDown, $keyDown, $keyDown, $keyEnter)) {
+        $dialogShown = Wait-Until {
+            $script:dialog = [TestNative]::FindWindow([NullString]::Value, 'Change hotkey')
+            $script:dialog -ne [IntPtr]::Zero -and (Test-Foreground $script:dialog)
+        }
+    }
+    Add-Result 'Tray menu opens the hotkey dialog' $dialogShown
+    if ($dialogShown) {
+        Wait-Milliseconds 200
+        Save-WindowImage $dialog "hotkey-dialog-$Theme.png"
+
+        # The default hotkey is shown with the character on the key (an umlaut on German keyboards).
+        $keyCharacter = ([string][char]([TestNative]::MapVirtualKey(0xC0, 2) -band 0xFFFF)).ToUpper()
+        $current = [TestNative]::TextOf([TestNative]::FocusOf($dialog))
+        Add-Result 'Dialog shows the current hotkey with the key character' ($current -eq "Ctrl+$keyCharacter") $current
+
+        [TestNative]::PressKeys(0x11, 0x12, 0x10, 0x78)   # Ctrl+Alt+Shift+F9
+        Wait-Milliseconds 300
+        $shown = [TestNative]::TextOf([TestNative]::FocusOf($dialog))
+        Add-Result 'Dialog shows the pressed combination' ($shown -eq 'Ctrl+Alt+Shift+F9') $shown
+        if (Test-Foreground $dialog) { [TestNative]::PressKeys($keyEnter) }   # OK
+        [void](Wait-Until { -not [TestNative]::IsWindowVisible($dialog) })
+
+        $newTaken = -not (Test-HotkeyFree 0x7 0x78)
+        $oldFree = Test-HotkeyFree 0x2 0xC0
+        Add-Result 'New hotkey registered, old one released' ($newTaken -and $oldFree) "new taken: $newTaken, old free: $oldFree"
+    }
+
+    # --- tray menu: Dark mode switches the theme ---
+    $before = $after = -1
+    if (Show-TestPopup) {
+        $before = Get-WindowBrightness $popup
+        Hide-TestPopup
+    }
+    if ((Open-TrayMenu) -and (Send-MenuKeys $keyDown, $keyDown, $keyDown, $keyDown, $keyEnter)) {
+        Wait-Milliseconds 300
+        if (Show-TestPopup) {
+            $after = Get-WindowBrightness $popup
+            Save-WindowImage $popup "popup-switched-from-$Theme.png"
+            Hide-TestPopup
+        }
+    }
+    $isDark = { param($brightness) $brightness -ge 0 -and $brightness -lt 100 }
+    $isLight = { param($brightness) $brightness -gt 150 }
+    $switched = if ($Theme -eq 'Dark') { (& $isDark $before) -and (& $isLight $after) } else { (& $isLight $before) -and (& $isDark $after) }
+    Add-Result 'Tray menu: dark mode switches the theme' $switched "brightness before $before, after $after"
 }
 finally {
     $target.Dispose()

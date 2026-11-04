@@ -23,19 +23,27 @@
     Passed on to ClipboardManager.ps1.
 
 .PARAMETER Theme
-    Passed on to ClipboardManager.ps1: Auto, Light or Dark.
+    Passed on to ClipboardManager.ps1: Dark (default), Light or Auto.
+
+.PARAMETER Size
+    Passed on to ClipboardManager.ps1: popup size S, M (default) or L.
 
 .PARAMETER Uninstall
     Stops a running instance and removes both shortcuts.
 
 .EXAMPLE
+    .\Install.ps1 -Autostart
+
+.EXAMPLE
+    .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L
+
+.EXAMPLE
+    .\Install.ps1 -Uninstall
+
+.NOTES
+    If the execution policy does not allow local scripts, run it as
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
-
-.EXAMPLE
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Dark
-
-.EXAMPLE
-    powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Uninstall
+    The shortcuts always start the manager with -ExecutionPolicy Bypass (for that process only).
 #>
 
 [CmdletBinding(DefaultParameterSetName = 'Install')]
@@ -51,8 +59,12 @@ param(
     [int]$MaxItems,
 
     [Parameter(ParameterSetName = 'Install')]
-    [ValidateSet('Auto', 'Light', 'Dark')]
+    [ValidateSet('Dark', 'Light', 'Auto')]
     [string]$Theme,
+
+    [Parameter(ParameterSetName = 'Install')]
+    [ValidateSet('S', 'M', 'L')]
+    [string]$Size,
 
     [Parameter(ParameterSetName = 'Uninstall', Mandatory)]
     [switch]$Uninstall
@@ -152,6 +164,7 @@ $managerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$m
 if ($PSBoundParameters.ContainsKey('Hotkey')) { $managerArguments += '-Hotkey', "`"$Hotkey`"" }
 if ($PSBoundParameters.ContainsKey('MaxItems')) { $managerArguments += '-MaxItems', $MaxItems }
 if ($PSBoundParameters.ContainsKey('Theme')) { $managerArguments += '-Theme', $Theme }
+if ($PSBoundParameters.ContainsKey('Size')) { $managerArguments += '-Size', $Size }
 $shortcutArguments = (@('--headless', "`"$powershellExe`"") + $managerArguments) -join ' '
 
 New-Shortcut -Path $startMenuShortcut -Arguments $shortcutArguments

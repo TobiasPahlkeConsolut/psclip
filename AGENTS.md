@@ -17,7 +17,10 @@ little inline C#. See [README.md](README.md) for features and usage.
 ## Hard constraints
 
 - **Nothing is persisted.** History, pinned entries and runtime settings live in memory only. Do not add files,
-  registry values or any other storage without the owner asking for it - it is the defining feature.
+  registry values or any other storage without the owner asking for it - it is the defining feature. Settings
+  changed in the tray menu (hotkey, dark mode, window size) therefore last until exit; permanent settings are
+  script parameters, passed on by `Install.ps1`.
+- **For consolut internal use only** (see README). Keep the notice in the README.
 - **Windows PowerShell 5.1 only**, no PowerShell 7 syntax: no `? :`, `??`, `?.`, `&&`, `||`, `-Parallel`.
   `[Type]::new()` and `using namespace` are fine (5.0+).
 - **C# in `Add-Type` is compiled as C# 5**: no string interpolation (`$"..."`), `?.`, `nameof`, expression-bodied
@@ -48,6 +51,10 @@ Theme, Window construction, Main.
 - Pasting: `Invoke-SelectedEntry` sets the clipboard, `ForceForeground`s the window that was active when the hotkey
   was pressed and only then sends Ctrl+V. Never send keystrokes without that foreground check.
 - A named mutex `Local\PsClipboardManager` keeps one instance per session.
+- The popup is resized to the configured size (`$PopupSizes`, `-Size`) every time it opens (`Reset-PopupSize`);
+  manual resizing is intentionally temporary.
+- Context menus use `PsClip.MenuRenderer` (check marks and arrows in the text color). Submenus are separate
+  drop-downs: give them the renderer in `Set-Theme` as well.
 
 ## PowerShell pitfalls already hit here
 
@@ -73,7 +80,8 @@ Theme, Window construction, Main.
    ```
 2. ASCII check (see above) for every changed `.ps1`.
 3. End-to-end test - **ask the user first**: it opens windows on their desktop and sends real keystrokes for about
-   20 seconds (guarded by foreground checks; the clipboard is restored afterwards):
+   30 seconds (guarded by foreground checks; the clipboard is restored afterwards). It navigates the tray menu by
+   counting `Down` presses (`Send-MenuKeys`) - update those counts when the menu order changes:
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Dark
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Light

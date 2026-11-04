@@ -1,4 +1,8 @@
-# Clipboard Manager
+# psclip
+
+> [!IMPORTANT]
+> **For consolut internal use only.** psclip is an internal tool. Do not distribute, publish or share it outside
+> consolut. See [Internal use](#internal-use).
 
 A small clipboard history for Windows, inspired by [Ditto](https://ditto-cp.sourceforge.io/) but much simpler:
 one PowerShell script, no extra software, no admin rights - and **nothing is ever written to disk**.
@@ -12,9 +16,11 @@ The history lives in memory only and is gone when the script exits.
 ## Features
 
 - Records all text you copy, newest first (default: last 200 entries; copying an entry again moves it to the top)
-- **Hotkey popup** (default `Ctrl+Ö` on a German keyboard) next to the mouse cursor: type to filter, `Enter` pastes into the window you were working in
+- **Hotkey popup** (default `Ctrl+Ö` on a German keyboard) next to the mouse cursor: type to filter, `Enter` pastes
+  into the window you were working in
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"
-- **Light and dark mode**, following the Windows app theme
+- **Dark mode** (default) or light mode, switchable from the tray menu
+- **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
 - **Configurable hotkey** - as a parameter or at runtime from the tray menu
 - Skips content that password managers mark as private
 - Tray icon with menu; single instance per user
@@ -26,10 +32,12 @@ The history lives in memory only and is gone when the script exits.
 
 ## Install
 
+In a PowerShell window:
+
 ```powershell
-git clone <repository-url> clipboard_manager
-cd clipboard_manager
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
+git clone https://github.com/TobiasPahlkeConsolut/psclip.git
+cd psclip
+.\Install.ps1 -Autostart
 ```
 
 `Install.ps1` creates a **Clipboard Manager** shortcut in the Start menu, with `-Autostart` a second one in your
@@ -40,25 +48,38 @@ Nothing is copied - the shortcuts point to the script in this folder, so keep th
 Settings are passed on to the shortcuts:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Dark -MaxItems 500
+.\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L -MaxItems 500
 ```
 
 Running `Install.ps1` again replaces the shortcuts and restarts a running instance, so this is also how you change
 settings permanently.
 
+### Execution policy (only if needed)
+
+With the common setting `RemoteSigned` (check with `Get-ExecutionPolicy -List`) the commands above work as they
+are. Only if Windows refuses to run the scripts:
+
+- **Downloaded as ZIP** instead of cloned: Windows marks the files as coming from the internet. Unblock them once:
+  `Get-ChildItem -Recurse -Filter *.ps1 | Unblock-File`
+- **Stricter policy** (`Restricted`, `AllSigned`): bypass it for this one call - it does not change your settings:
+  `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart`
+
+The shortcuts always start the manager with `-ExecutionPolicy Bypass` (for that process only), so autostart works
+either way.
+
 ## Run without installing
 
-To try it out in a console (closing the console or `Exit` in the tray menu stops it; `-Verbose` logs what happens,
-never the clipboard content itself):
+To try it out in a PowerShell window (`-Verbose` logs what happens, never the clipboard content itself; stop it with
+*Exit* in the tray menu - `Ctrl+C` does not work while it runs):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\ClipboardManager.ps1 -Verbose
+.\ClipboardManager.ps1 -Verbose
 ```
 
 To run it without any window:
 
 ```powershell
-conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ClipboardManager.ps1
+conhost.exe --headless powershell.exe -NoProfile -File .\ClipboardManager.ps1
 ```
 
 > Why `conhost.exe --headless`? With Windows Terminal as the default terminal (the default on Windows 11),
@@ -69,31 +90,44 @@ conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File .
 
 Press the hotkey anywhere. The popup opens at the mouse cursor:
 
-| Key                     | Action                                                    |
-| ----------------------- | --------------------------------------------------------- |
-| *type*                  | Filter - every word must match, case-insensitive          |
-| `Up` / `Down`, `PgUp` / `PgDn` | Move the selection                                 |
-| `Enter`, double-click   | Paste the entry into the window that was active           |
-| `Ctrl+P`                | Pin / unpin the entry                                     |
-| `Shift+Delete`          | Remove the entry                                          |
-| `Esc`, click elsewhere  | Close                                                     |
+| Key                            | Action                                           |
+| ------------------------------ | ------------------------------------------------ |
+| *type*                         | Filter - every word must match, case-insensitive |
+| `Up` / `Down`, `PgUp` / `PgDn` | Move the selection                               |
+| `Enter`, double-click          | Paste the entry into the window that was active  |
+| `Ctrl+P`                       | Pin / unpin the entry                            |
+| `Shift+Delete`                 | Remove the entry                                 |
+| `Esc`, click elsewhere         | Close                                            |
 
-Right-click an entry for the same actions.
+Right-click an entry for the same actions. You can resize the popup while it is open; the next time it opens at the
+chosen size again.
 
 The **tray icon** (a small blue clipboard, possibly in the `^` overflow area of the taskbar):
 
-- left-click: open the history in *copy* mode - choosing an entry puts it on the clipboard without pasting
-- right-click: *Show history*, *Change hotkey*, *Clear history (keeps pinned)*, *Exit*
+<img src="docs/tray-menu-dark.png" alt="Tray menu" align="right">
 
-A hotkey changed from the tray menu lasts until the manager exits; use `Install.ps1 -Hotkey` to keep it.
+- left-click: open the history in *copy* mode - choosing an entry puts it on the clipboard without pasting
+- right-click:
+  - *Show history*
+  - *Clear history (keeps pinned)*
+  - *Change hotkey* - press the new combination
+  - *Dark mode* - on / off
+  - *Window size* - Small, Medium, Large
+  - *Exit*
+
+Settings changed in the tray menu last until the manager exits (nothing is saved). To keep them, pass them to
+`Install.ps1` (see [Options](#options)).
+
+<br clear="right">
 
 ## Options
 
-| Parameter   | Default        | Description                                                                      |
-| ----------- | -------------- | -------------------------------------------------------------------------------- |
-| `-Hotkey`   | `Ctrl+Ö`       | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
-| `-MaxItems` | `200`          | Unpinned entries to keep                                                         |
-| `-Theme`    | `Auto`         | `Auto` (follow Windows), `Light` or `Dark`                                       |
+| Parameter   | Default  | Description                                                                         |
+| ----------- | -------- | ----------------------------------------------------------------------------------- |
+| `-Hotkey`   | `Ctrl+Ö` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
+| `-Theme`    | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                            |
+| `-Size`     | `M`      | Popup size `S`, `M` or `L` - mostly the height (about 6, 10 or 17 entries visible)  |
+| `-MaxItems` | `200`    | Unpinned entries to keep                                                            |
 
 The default hotkey is written as `Ctrl+Oemtilde` in the script (it must stay ASCII). It is the same physical key on
 every layout: `Ctrl+Ö` on a German keyboard, ``Ctrl+` `` on a US keyboard (Ditto's default). On German keyboards VS
@@ -104,7 +138,7 @@ Code uses `Ctrl+Ö` to toggle its terminal; the global hotkey takes precedence, 
 ## Uninstall
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Uninstall
+.\Install.ps1 -Uninstall
 ```
 
 This stops a running instance and removes both shortcuts. Then delete the folder.
@@ -135,9 +169,18 @@ the front and sends `Ctrl+V`. The popup, tray icon and dialogs are Windows Forms
 ## Development
 
 See [AGENTS.md](AGENTS.md) for the conventions and pitfalls of this code base. The end-to-end test starts the
-manager and drives it on the real desktop (it opens windows and sends a few keystrokes for about 20 seconds - don't
-type meanwhile):
+manager and drives it on the real desktop (it opens windows and sends keystrokes for about 30 seconds - don't type
+meanwhile):
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Dark
+.\tests\Test-ClipboardManager.ps1 -Theme Dark
+.\tests\Test-ClipboardManager.ps1 -Theme Light
 ```
+
+## Internal use
+
+© 2026 consolut. All rights reserved.
+
+psclip is intended solely for internal use by consolut employees. It must not be distributed, published or made
+available to third parties, in whole or in part. It is provided as is, without warranty of any kind and without
+any obligation to provide support or updates.

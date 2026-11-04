@@ -18,7 +18,8 @@
         Esc                   close
 
     Right-click an entry for the same actions. Left-click the tray icon to open the history
-    in copy-only mode; right-click it for "Change hotkey", "Clear history" and "Exit".
+    in copy-only mode; right-click it for "Clear history", the settings (hotkey, dark mode,
+    window size) and "Exit". Settings changed there last until the script exits.
 
     Entries that the source application marks as private (password managers set the
     ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory formats) are
@@ -36,7 +37,13 @@
     Number of unpinned entries to keep; the oldest are dropped.
 
 .PARAMETER Theme
-    Auto follows the Windows app theme (checked each time the popup opens), or Light / Dark.
+    Dark (default), Light, or Auto to follow the Windows app theme (checked each time the popup
+    opens). "Dark mode" in the tray menu switches between dark and light.
+
+.PARAMETER Size
+    Size of the history popup: S, M (default) or L - mostly its height. The popup opens at this
+    size every time; resizing it by hand lasts until it closes. "Window size" in the tray menu
+    changes it.
 
 .EXAMPLE
     conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ClipboardManager.ps1
@@ -44,7 +51,7 @@
     Starts the manager without any console window.
 
 .EXAMPLE
-    .\ClipboardManager.ps1 -Hotkey 'Ctrl+Alt+V' -MaxItems 500 -Theme Dark -Verbose
+    .\ClipboardManager.ps1 -Hotkey 'Ctrl+Alt+V' -MaxItems 500 -Theme Light -Size L -Verbose
 
     Runs in the current console and logs what happens (never the clipboard content itself).
 
@@ -64,8 +71,11 @@ param(
     [ValidateRange(1, 100000)]
     [int]$MaxItems = 200,
 
-    [ValidateSet('Auto', 'Light', 'Dark')]
-    [string]$Theme = 'Auto'
+    [ValidateSet('Dark', 'Light', 'Auto')]
+    [string]$Theme = 'Dark',
+
+    [ValidateSet('S', 'M', 'L')]
+    [string]$Size = 'M'
 )
 
 Set-StrictMode -Version 2.0
@@ -83,6 +93,7 @@ $nativeCode = @'
 using System;
 using System.ComponentModel;
 using System.Drawing;
+using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -194,6 +205,43 @@ namespace PsClip
         public override Color MenuItemSelectedGradientEnd { get { return hover; } }
         public override Color SeparatorDark { get { return border; } }
         public override Color SeparatorLight { get { return border; } }
+    }
+
+    // Draws check marks and submenu arrows in the text color - the defaults are black and
+    // invisible on a dark background.
+    public sealed class MenuRenderer : ToolStripProfessionalRenderer
+    {
+        readonly Color text;
+
+        public MenuRenderer(Color back, Color hover, Color border, Color text)
+            : base(new MenuColors(back, hover, border))
+        {
+            this.text = text;
+        }
+
+        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
+        {
+            Rectangle r = e.ImageRectangle;
+            PointF[] points =
+            {
+                new PointF(r.Left + r.Width * 0.18f, r.Top + r.Height * 0.52f),
+                new PointF(r.Left + r.Width * 0.40f, r.Top + r.Height * 0.74f),
+                new PointF(r.Left + r.Width * 0.82f, r.Top + r.Height * 0.28f)
+            };
+            SmoothingMode previous = e.Graphics.SmoothingMode;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen pen = new Pen(text, Math.Max(1.5f, r.Height / 9f)))
+            {
+                e.Graphics.DrawLines(pen, points);
+            }
+            e.Graphics.SmoothingMode = previous;
+        }
+
+        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
+        {
+            e.ArrowColor = text;
+            base.OnRenderArrow(e);
+        }
     }
 
     public static class Native
@@ -349,6 +397,13 @@ $Palettes = @{
         SelText = [Color]::White
         Accent  = [Color]::FromArgb(0, 95, 184)
     }
+}
+
+# Client size of the popup per -Size, at 100 % display scaling (mostly the height changes)
+$PopupSizes = @{
+    S = [Size]::new(520, 240)
+    M = [Size]::new(560, 360)
+    L = [Size]::new(620, 540)
 }
 
 # RegisterHotKey modifier flags
@@ -706,6 +761,7 @@ function Show-Popup {
     }
 
     Set-Theme (Test-DarkTheme)
+    Reset-PopupSize
     if ($Ui.Search.Text) {
         $Ui.Search.Text = ''   # TextChanged refreshes the list
     }
@@ -724,6 +780,14 @@ function Show-Popup {
     [void][PsClip.Native]::ForceForeground($form.Handle)
     $form.Activate()
     [void]$Ui.Search.Focus()
+}
+
+function Reset-PopupSize {
+    # The popup always opens at the configured size; resizing it by hand lasts until it closes.
+    $logicalSize = $PopupSizes[$State.PopupSize]
+    $Ui.Form.ClientSize = [Size]::new(
+        [int]($logicalSize.Width * $Ui.Scale),
+        [int]($logicalSize.Height * $Ui.Scale))
 }
 
 function Show-PopupLater {
@@ -931,8 +995,8 @@ function Write-ListItem {
 #region Theme
 
 function Test-DarkTheme {
-    if ($Theme -eq 'Dark') { return $true }
-    if ($Theme -eq 'Light') { return $false }
+    if ($State.ThemeSetting -eq 'Dark') { return $true }
+    if ($State.ThemeSetting -eq 'Light') { return $false }
 
     try {
         $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
@@ -969,13 +1033,18 @@ function Set-Theme {
     [PsClip.Native]::SetDarkTitleBar($Ui.Form.Handle, $Dark)
     [PsClip.Native]::SetDarkControlTheme($Ui.List.Handle, $Dark)
 
-    foreach ($menu in $Ui.TrayMenu, $Ui.ListMenu) {
-        $menuColors = [PsClip.MenuColors]::new($colors.Back, $colors.Hover, $colors.Border)
-        $menu.Renderer = [ToolStripProfessionalRenderer]::new($menuColors)
+    # Submenus are separate drop-downs and need their own renderer.
+    foreach ($menu in $Ui.TrayMenu, $Ui.SizeMenuItem.DropDown, $Ui.ListMenu) {
+        $menu.Renderer = [PsClip.MenuRenderer]::new($colors.Back, $colors.Hover, $colors.Border, $colors.Text)
         $menu.BackColor = $colors.Back
         $menu.ForeColor = $colors.Text
     }
     $Ui.List.Invalidate()
+}
+
+function Switch-DarkMode {
+    $State.ThemeSetting = if ($State.IsDark) { 'Light' } else { 'Dark' }
+    Set-Theme (Test-DarkTheme)
 }
 
 #endregion
@@ -1025,7 +1094,6 @@ function New-PopupWindow {
     $form.KeyPreview = $true
     $form.AutoScaleMode = 'None'
     $form.Font = $Ui.Font
-    $form.ClientSize = [Size]::new([int](560 * $scale), [int](360 * $scale))
     $form.MinimumSize = [Size]::new([int](300 * $scale), [int](200 * $scale))
 
     $search = [TextBox]::new()
@@ -1064,6 +1132,7 @@ function New-PopupWindow {
     $Ui.SearchPanel = $searchPanel
     $Ui.List = $list
     $Ui.Status = $status
+    Reset-PopupSize
 
     [void]$form.Handle   # create the window now so that BeginInvoke works before the first Show
     [PsClip.Native]::SetCueBanner($search.Handle, 'Type to filter...')
@@ -1143,12 +1212,29 @@ function New-ListMenu {
 function New-TrayIcon {
     $menu = [ContextMenuStrip]::new()
     $menu.Items.Add('Show history').add_Click({ Show-PopupLater })
-    $Ui.HotkeyMenuItem = $menu.Items.Add('Change hotkey...')
-    $Ui.HotkeyMenuItem.add_Click({ [void]$Ui.Form.BeginInvoke([Action] { Edit-Hotkey }) })
     $menu.Items.Add('Clear history (keeps pinned)').add_Click({ Clear-ClipboardHistory })
     [void]$menu.Items.Add([ToolStripSeparator]::new())
+
+    $Ui.HotkeyMenuItem = $menu.Items.Add('Change hotkey...')
+    $Ui.HotkeyMenuItem.add_Click({ [void]$Ui.Form.BeginInvoke([Action] { Edit-Hotkey }) })
+
+    $Ui.DarkModeMenuItem = $menu.Items.Add('Dark mode')
+    $Ui.DarkModeMenuItem.add_Click({ Switch-DarkMode })
+
+    $Ui.SizeMenuItem = [ToolStripMenuItem]::new('Window size')
+    foreach ($option in @{ Tag = 'S'; Text = 'Small' }, @{ Tag = 'M'; Text = 'Medium' }, @{ Tag = 'L'; Text = 'Large' }) {
+        $item = $Ui.SizeMenuItem.DropDownItems.Add($option.Text)
+        $item.Tag = $option.Tag
+        $item.add_Click({
+            param($source, $e)
+            $State.PopupSize = $source.Tag
+        })
+    }
+    [void]$menu.Items.Add($Ui.SizeMenuItem)
+
+    [void]$menu.Items.Add([ToolStripSeparator]::new())
     $menu.Items.Add('Exit').add_Click({ $Ui.AppContext.ExitThread() })
-    $menu.add_Opening({ Set-Theme (Test-DarkTheme) })
+    $menu.add_Opening({ Update-TrayMenu })
     $Ui.TrayMenu = $menu
 
     $tray = [NotifyIcon]::new()
@@ -1159,6 +1245,15 @@ function New-TrayIcon {
         if ($e.Button -eq 'Left') { Show-PopupLater }
     })
     $Ui.Tray = $tray
+}
+
+function Update-TrayMenu {
+    # Before the tray menu opens: current theme and check marks.
+    Set-Theme (Test-DarkTheme)
+    $Ui.DarkModeMenuItem.Checked = $State.IsDark
+    foreach ($item in $Ui.SizeMenuItem.DropDownItems) {
+        $item.Checked = $item.Tag -eq $State.PopupSize
+    }
 }
 
 function Update-TrayText {
@@ -1229,6 +1324,8 @@ $State = @{
     PasteTarget         = [IntPtr]::Zero          # window to paste into; zero = copy only
     HotkeyText          = Format-HotkeyText $Hotkey   # as shown to the user
     HotkeyActive        = $false
+    ThemeSetting        = $Theme                  # Dark, Light or Auto; the tray menu switches it
+    PopupSize           = $Size                   # S, M or L; the tray menu changes it
     IsDark              = $null
     Colors              = $null
     Gdi                 = @{}                     # brushes and pens of the current theme
