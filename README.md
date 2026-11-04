@@ -19,9 +19,9 @@ The history lives in memory only and is gone when the script exits.
 - **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
 - **Configurable hotkey** - as a parameter or at runtime from the tray menu
 - Skips content that password managers mark as private
-- **Keep awake** (optional, unrelated to the clipboard): presses the Pause key when you have been idle for 30 seconds,
+- **Keep awake** (optional, unrelated to the clipboard): presses the F15 key when you have been idle for 30 seconds,
   so Windows does not consider the session idle
-- Tray icon with menu; single instance per user
+- Tray icon with menu; one instance per Windows session
 
 ## Requirements
 
@@ -46,8 +46,10 @@ What `Install.ps1` does - and doesn't:
   (`%APPDATA%\Microsoft\Windows\Start Menu\Programs`), so you can start psclip like any app.
 - With `-Autostart` it creates the same shortcut in your Startup folder (`shell:startup`), so psclip starts when you
   sign in. Without `-Autostart`, an existing autostart shortcut is removed.
-- It starts psclip right away (and restarts a running instance, so new settings apply).
-- Everything is per user: no admin rights, no registry entries, no services.
+- It starts psclip right away. If psclip is already running, it asks before restarting it (the history would be
+  lost); `-Force` restarts without asking.
+- Everything is per user: no admin rights (it refuses to run as administrator), no registry entries, no services.
+- It needs Windows PowerShell 5.1 (`powershell.exe`), not PowerShell 7 (`pwsh`).
 
 Settings are passed on to the shortcuts:
 
@@ -67,8 +69,8 @@ are. Only if Windows refuses to run the scripts:
 - **Stricter policy** (`Restricted`, `AllSigned`): bypass it for this one call - it does not change your settings:
   `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart`
 
-The shortcuts always start psclip with `-ExecutionPolicy Bypass` (for that process only), so autostart works either
-way.
+The shortcuts start psclip with `-ExecutionPolicy Bypass` (for that process only), so autostart works with either
+setting - unless the execution policy is enforced by Group Policy, which a command line cannot override.
 
 ## Run without installing
 
@@ -128,8 +130,8 @@ Settings changed in the tray menu last until psclip exits (nothing is saved). To
 
 Has nothing to do with the clipboard - it replaces a separate "mouse mover" tool. When switched on, psclip checks
 every second how long there has been no mouse or keyboard input; after 30 seconds (`-KeepAwakeSeconds`) it presses
-the **Pause** key, which hardly any program reacts to. Windows then never sees the session as idle. While you are
-working, nothing is sent.
+the **F15** key, which no keyboard has and no program uses (unlike Pause, which freezes the output of console
+windows). Windows then never sees the session as idle. While you are working, nothing is sent.
 
 ## Options
 
@@ -139,8 +141,14 @@ working, nothing is sent.
 | `-Theme`            | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                    |
 | `-Size`             | `M`      | Popup size `S`, `M` or `L` - mostly the height (about 6, 10 or 17 entries visible) |
 | `-MaxItems`         | `200`    | Unpinned entries to keep                                                    |
+| `-MaxEntryLength`   | `1000000`| Texts with more characters are not recorded                                 |
 | `-KeepAwake`        | off      | Start with *Keep awake* switched on                                         |
-| `-KeepAwakeSeconds` | `30`     | Idle seconds before *Keep awake* presses Pause                              |
+| `-KeepAwakeSeconds` | `30`     | Idle seconds before *Keep awake* presses F15                                |
+| `-InstanceName`     | `PsClipboardManager` | Only to run a second, separate instance (the end-to-end test does)  |
+
+Hotkeys that would get in the way of typing are refused: a plain key (only `F1`-`F11` and `F13`-`F24` work alone),
+`Shift` plus a character key, and `Ctrl+Alt` plus a key that types a character with AltGr (e.g. `Ctrl+Alt+Q` = `@`
+on a German keyboard).
 
 The default hotkey is written as `Ctrl+Oemtilde` in the script (it must stay ASCII). It is the same physical key on
 every layout: `Ctrl+Ö` on a German keyboard, ``Ctrl+` `` on a US keyboard (Ditto's default). On German keyboards VS
@@ -165,7 +173,10 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 
 ## Limitations
 
-- **Text only.** Images, files and formatting are not recorded; pasting inserts plain text.
+- **Text only.** Images, files and formatting are not recorded; pasting inserts plain text. Texts longer than
+  1,000,000 characters (`-MaxEntryLength`) are skipped.
+- **In memory only** means psclip never writes the history anywhere. Windows itself may still move memory to the
+  page file or into a crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is
   still put on the clipboard - press `Ctrl+V` yourself.
 - **Combinations already taken** by another program cannot be captured in the *Change hotkey* dialog: nothing
@@ -194,11 +205,14 @@ See [AGENTS.md](AGENTS.md) for the conventions and pitfalls of this code base. T
 # Unit tests: a few seconds, invisible (Pester 3.4, which ships with Windows)
 .\tests\Invoke-UnitTests.ps1
 
-# End-to-end test: starts psclip and drives it on the real desktop - it opens windows and sends keystrokes for
-# about 45 seconds, so don't type, click or move the mouse meanwhile
+# End-to-end test: starts its own psclip and drives it on the real desktop - it opens windows and sends keystrokes
+# for about 45 seconds, so don't type, click or move the mouse meanwhile
 .\tests\Test-ClipboardManager.ps1 -Theme Dark
 .\tests\Test-ClipboardManager.ps1 -Theme Light
 ```
+
+The end-to-end test runs a separate instance with its own name and hotkey and only ever closes that one, so a psclip
+you are using keeps running - it just records the test's clipboard entries (they start with `psclip test:`).
 
 ## Internal use
 

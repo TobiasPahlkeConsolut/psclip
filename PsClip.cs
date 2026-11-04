@@ -6,8 +6,11 @@ using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
+using ComDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 
 namespace PsClip
 {
@@ -166,9 +169,51 @@ namespace PsClip
         [DllImport("user32.dll")] static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
         [DllImport("user32.dll")] static extern short GetAsyncKeyState(int vk);
-        [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint MapVirtualKey(uint code, uint mapType);
         [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extraInfo);
+        [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);
         [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+        [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr handle);
+        [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr handle);
+        [DllImport("kernel32.dll")] static extern UIntPtr GlobalSize(IntPtr handle);
+        [DllImport("ole32.dll")] static extern void ReleaseStgMedium(ref STGMEDIUM medium);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        static extern int ToUnicode(uint vk, uint scanCode, byte[] keyState, StringBuilder buffer, int bufferSize, uint flags);
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct Input
+        {
+            public uint Type;
+            public InputUnion Data;
+        }
+
+        // MouseInput is the largest member and gives the union its size; it is never sent.
+        [StructLayout(LayoutKind.Explicit)]
+        struct InputUnion
+        {
+            [FieldOffset(0)] public MouseInput Mouse;
+            [FieldOffset(0)] public KeyboardInput Keyboard;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct MouseInput
+        {
+            public int X, Y;
+            public uint MouseData, Flags, Time;
+            public IntPtr ExtraInfo;
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct KeyboardInput
+        {
+            public ushort VirtualKey, ScanCode;
+            public uint Flags, Time;
+            public IntPtr ExtraInfo;
+        }
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern uint SendInput(uint count, Input[] inputs, int size);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, string lParam);
@@ -216,6 +261,70 @@ namespace PsClip
             return (char)(MapVirtualKey((uint)vk, 2 /* MAPVK_VK_TO_CHAR */) & 0xFFFF);
         }
 
+        // True if Ctrl+Alt plus this key types a character on the current layout. Windows treats
+        // Ctrl+Alt as AltGr, so e.g. Ctrl+Alt+Q types @ on a German keyboard.
+        public static bool TypesCharacterWithAltGr(int vk)
+        {
+            byte[] keyState = new byte[256];
+            keyState[0x11] = 0x80;   // Ctrl
+            keyState[0x12] = 0x80;   // Alt
+            StringBuilder buffer = new StringBuilder(8);
+            // Flag 4: do not change the keyboard state (pending dead keys) of this thread.
+            int result = ToUnicode((uint)vk, MapVirtualKey((uint)vk, 0), keyState, buffer, buffer.Capacity, 4);
+            return result != 0;   // > 0: characters, -1: dead key
+        }
+
+        // Raw bytes of a clipboard format, read directly from its HGLOBAL; null if the format is
+        // missing or larger than maxBytes. WinForms' DataObject.GetData deserializes custom formats
+        // with BinaryFormatter - which runs code chosen by whoever put the data on the clipboard -
+        // so custom formats must only be read with this method.
+        public static byte[] ReadFormatBytes(object dataObject, string formatName, int maxBytes)
+        {
+            ComDataObject data = dataObject as ComDataObject;
+            if (data == null) return null;
+
+            FORMATETC format = new FORMATETC();
+            format.cfFormat = unchecked((short)DataFormats.GetFormat(formatName).Id);
+            format.dwAspect = DVASPECT.DVASPECT_CONTENT;
+            format.lindex = -1;
+            format.tymed = TYMED.TYMED_HGLOBAL;
+            if (data.QueryGetData(ref format) != 0) return null;
+
+            STGMEDIUM medium;
+            try
+            {
+                data.GetData(ref format, out medium);
+            }
+            catch (COMException)
+            {
+                return null;
+            }
+
+            try
+            {
+                if (medium.tymed != TYMED.TYMED_HGLOBAL || medium.unionmember == IntPtr.Zero) return null;
+                ulong size = GlobalSize(medium.unionmember).ToUInt64();
+                if (size > (ulong)maxBytes) return null;
+
+                IntPtr pointer = GlobalLock(medium.unionmember);
+                if (pointer == IntPtr.Zero) return null;
+                try
+                {
+                    byte[] bytes = new byte[size];
+                    Marshal.Copy(pointer, bytes, 0, bytes.Length);
+                    return bytes;
+                }
+                finally
+                {
+                    GlobalUnlock(medium.unionmember);
+                }
+            }
+            finally
+            {
+                ReleaseStgMedium(ref medium);
+            }
+        }
+
         // SetForegroundWindow is often refused for background processes; attaching to the
         // input queue of the current foreground thread lifts that restriction.
         public static bool ForceForeground(IntPtr hwnd)
@@ -240,17 +349,32 @@ namespace PsClip
             return GetForegroundWindow() == hwnd;
         }
 
-        // Sends Ctrl+V to the foreground window. Waits (max. 1 s) until the user has released
-        // modifier keys that would otherwise turn it into e.g. Ctrl+Shift+V.
-        public static void SendCtrlV()
+        // Sends Ctrl+V to the target window. Waits (max. 1 s) until the user has released Shift,
+        // Ctrl, Alt, Win and Enter - otherwise it would become e.g. Ctrl+Shift+V, or a held Enter
+        // would repeat into the target - then checks again that the target is in the foreground and
+        // sends the four key events as one sequence that user input cannot interleave.
+        // Returns false if nothing was sent.
+        public static bool PasteInto(IntPtr target)
         {
-            int[] modifiers = { 0x10, 0x11, 0x12, 0x5B, 0x5C };   // Shift, Ctrl, Alt, LWin, RWin
-            for (int i = 0; i < 100 && AnyKeyDown(modifiers); i++) Thread.Sleep(10);
+            int[] keys = { 0x10, 0x11, 0x12, 0x5B, 0x5C, 0x0D };   // Shift, Ctrl, Alt, LWin, RWin, Enter
+            for (int i = 0; i < 100 && AnyKeyDown(keys); i++) Thread.Sleep(10);
+            if (AnyKeyDown(keys) || GetForegroundWindow() != target) return false;
 
-            SendKey(0x11, false);
-            SendKey(0x56, false);
-            SendKey(0x56, true);
-            SendKey(0x11, true);
+            Input[] inputs =
+            {
+                KeyInput(0x11, false), KeyInput(0x56, false), KeyInput(0x56, true), KeyInput(0x11, true)
+            };
+            return SendInput((uint)inputs.Length, inputs, Marshal.SizeOf(typeof(Input))) == inputs.Length;
+        }
+
+        static Input KeyInput(ushort vk, bool up)
+        {
+            Input input = new Input();
+            input.Type = 1;   // INPUT_KEYBOARD
+            input.Data.Keyboard.VirtualKey = vk;
+            input.Data.Keyboard.ScanCode = (ushort)MapVirtualKey(vk, 0);
+            input.Data.Keyboard.Flags = up ? 0x0002u : 0u;   // KEYEVENTF_KEYUP
+            return input;
         }
 
         public static void PressKey(byte vk)

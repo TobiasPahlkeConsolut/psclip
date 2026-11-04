@@ -12,8 +12,9 @@ See [README.md](README.md) for features and usage.
 | `ClipboardManager.ps1`            | The app (tray, popup, hotkey, clipboard listener, keep awake)        |
 | `PsClip.cs`                       | C# helpers (Win32 interop, menu renderer), compiled with `Add-Type`  |
 | `Install.ps1`                     | Creates/removes Start menu and autostart shortcuts                   |
-| `tests/ClipboardManager.Tests.ps1`| Unit tests (Pester 3.4 syntax)                                       |
-| `tests/Invoke-UnitTests.ps1`      | Runs the unit tests with Pester 3/4                                  |
+| `tests/ClipboardManager.Tests.ps1`| Unit tests of the app (Pester 3.4 syntax)                            |
+| `tests/Install.Tests.ps1`         | Unit tests of `Install.ps1` (never touches a running psclip)         |
+| `tests/Invoke-UnitTests.ps1`      | Runs all `*.Tests.ps1` with Pester 3/4                               |
 | `tests/Test-ClipboardManager.ps1` | End-to-end test on the real desktop                                  |
 | `docs/`                           | Screenshots for the README (produced by the end-to-end test)         |
 
@@ -44,6 +45,11 @@ history, Popup, Theme, Keep awake, Window construction, Main.
 
 - **Dot-sourcing loads only the functions**: the first line of the Main region returns when
   `$MyInvocation.InvocationName -eq '.'`. The unit tests rely on this; keep all startup code below that guard.
+  `Install.ps1` has the same guard, and its `Assert-Hotkey` dot-sources the app inside a function to reuse
+  `ConvertFrom-HotkeyText`.
+- **The user may be running psclip while you work.** Never stop it (`Install.ps1` restarts it - do not run
+  `Install.ps1` itself). The end-to-end test starts its own instance via `-InstanceName` (separate mutex and hidden
+  window) and must only ever find and close windows of its own process id.
 - **State lives in two script-level hashtables:** `$State` (history, pinned entries, filter result, paste target,
   hotkey, theme, size, keep awake) and `$Ui` (controls, fonts, metrics, timer, `ClipHost`, `AppContext`).
   Functions read and mutate them directly; the unit tests replace them with stand-ins (`Reset-TestState`).
@@ -52,17 +58,25 @@ history, Popup, Theme, Keep awake, Window construction, Main.
   constructing function. (Exception: `Show-HotkeyDialog`, whose handlers run inside `ShowDialog()`.)
 - PowerShell variable names are case-insensitive: never name a local variable `$state`, `$ui`, `$size`, `$theme`,
   `$hotkey` or `$keepAwake` (they would shadow `$State`, `$Ui` or the script parameters).
-- `PsClip.ClipboardHost` (C#) is a hidden window titled `PsClipboardManager`: it raises `ClipboardChanged`
+- Hotkeys: `ConvertFrom-HotkeyText` parses and validates (`Get-HotkeyProblem`: no plain keys, no Shift+character,
+  no AltGr combinations) for the parameter, the dialog and `Install.ps1` alike. `$State.HotkeySpec` keeps the key
+  code; `$State.HotkeyText` is display text only and depends on the keyboard layout - never parse it again.
+- `PsClip.ClipboardHost` (C#) is a hidden window titled with the `-InstanceName` (default `PsClipboardManager`): it raises `ClipboardChanged`
   (WM_CLIPBOARDUPDATE), `HotkeyPressed` (WM_HOTKEY) and `CloseRequested` (WM_CLOSE, used by `Install.ps1` and the
   test for a graceful stop).
 - Pasting: `Invoke-SelectedEntry` sets the clipboard, `ForceForeground`s the window that was active when the hotkey
-  was pressed and only then sends Ctrl+V. Never send keystrokes without that foreground check.
+  was pressed, and `PsClip.Native.PasteInto` waits for released keys, checks the foreground again and sends Ctrl+V
+  with one `SendInput` call. Never send keystrokes without such a foreground check - also not in tests or ad-hoc
+  diagnostic scripts: they would type into whatever window the user has in front.
+- Clipboard reading: custom formats (anything that is not text, HTML, RTF, bitmap, ...) must only be read with
+  `PsClip.Native.ReadFormatBytes`. `DataObject.GetData()` deserializes them with BinaryFormatter, i.e. runs code
+  chosen by whoever put them on the clipboard (another program, an RDP session). `GetDataPresent()` is safe.
 - The popup is resized to the configured size (`$PopupSizes`, `-Size`) every time it opens (`Reset-PopupSize`);
   manual resizing is intentionally temporary.
 - Context menus use `PsClip.MenuRenderer` (check marks and arrows in the text color). Submenus are separate
   drop-downs: give them the renderer in `Set-Theme` as well.
 - Keep awake (unrelated to the clipboard) is a WinForms timer ticking every second; `Test-KeepAwakeDue` decides,
-  from `GetLastInputInfo`, whether to press Pause.
+  from `GetLastInputInfo`, whether to press F15 (not Pause: that freezes console output).
 - A named mutex `Local\PsClipboardManager` keeps one instance per session.
 
 ## PowerShell pitfalls already hit here
@@ -76,7 +90,11 @@ history, Popup, Theme, Keep awake, Window construction, Main.
 - Generic methods with `[ref]` arguments (e.g. `[Enum]::TryParse`) don't resolve reliably in 5.1; use the
   non-generic API or casts in `try/catch` instead.
 - Double quotes inside arguments to native programs are mangled by PowerShell 5.1 (e.g. `git commit -m` with a
-  quoted word); pass such text through a file (`git commit -F`).
+  quoted word); pass such text through stdin or a file (`git commit -F -`).
+- `$input`, `$args`, `$matches`, `$event`, `$sender` and `$this` are automatic variables - do not use them as names.
+- Under StrictMode, `$hashtable.MissingKey` throws; use `ContainsKey` where a key may be missing (e.g. cleanup code).
+- In tests, find windows and controls by process id and class name, not by asking which control has the focus:
+  right after a window appears the focus may still be elsewhere.
 
 ## Style
 
@@ -95,9 +113,11 @@ history, Popup, Theme, Keep awake, Window construction, Main.
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Invoke-UnitTests.ps1
    ```
-4. End-to-end test - **ask the user first**: it opens windows on their desktop and sends real keystrokes for about
-   45 seconds (guarded by foreground checks; the clipboard is restored afterwards). It navigates the tray menu by
-   counting `Down` presses (`Send-MenuKeys`) - update those counts when the menu order changes:
+4. End-to-end test - **ask the user first** (or have their standing permission): it opens windows on their desktop
+   and sends real keystrokes for about 45 seconds (guarded by foreground checks; the clipboard is restored
+   afterwards). It runs its own instance next to the user's psclip, which records the test's entries
+   (`psclip test: ...`). It navigates the tray menu by counting `Down` presses (`Send-MenuKeys`) - update those
+   counts when the menu order changes:
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Dark
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Light

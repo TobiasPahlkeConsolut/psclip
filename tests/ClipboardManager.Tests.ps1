@@ -4,7 +4,8 @@
 
 .DESCRIPTION
     Run them with .\tests\Invoke-UnitTests.ps1, which loads the Pester version that ships with
-    Windows (3.4). The syntax used here works with Pester 3 and 4.
+    Windows (3.4). The syntax used here works with Pester 3 and 4. Controls are created but never
+    shown; clipboard data is built in memory with [DataObject].
 #>
 
 # Load the functions without starting the app (see the guard at the start of "#region Main").
@@ -22,6 +23,7 @@ function Reset-TestState {
         Filtered            = [System.Collections.Generic.List[string]]::new()
         FilteredPinnedCount = 0
         PasteTarget         = [IntPtr]::Zero
+        HotkeySpec          = [pscustomobject]@{ Modifiers = 6; VirtualKey = 0x56 }
         HotkeyText          = 'Ctrl+Shift+V'
         HotkeyActive        = $true
         ThemeSetting        = 'Dark'
@@ -38,12 +40,30 @@ function Reset-TestState {
         KeepAwakeTimer = [pscustomobject]@{ Enabled = $false }
     }
     $script:MaxItems = 200
+    $script:MaxEntryLength = 1000000
     $script:KeepAwakeSeconds = 30
 }
 
 function Add-Entries {
     param([string[]]$Texts)
     foreach ($text in $Texts) { Add-ClipboardEntry $text }
+}
+
+function New-KeyEvent {
+    param([System.Windows.Forms.Keys]$KeyData)
+    [System.Windows.Forms.KeyEventArgs]::new($KeyData)
+}
+
+function New-ClipHostStub {
+    # Records the calls instead of registering hotkeys with Windows.
+    $stub = [pscustomobject]@{ Calls = [System.Collections.Generic.List[string]]::new() }
+    $stub | Add-Member -MemberType ScriptMethod -Name ClearHotkey -Value { $this.Calls.Add('clear') }
+    $stub | Add-Member -MemberType ScriptMethod -Name SetHotkey -Value {
+        param($modifiers, $key)
+        $this.Calls.Add("set $modifiers $key")
+        $true
+    }
+    $stub
 }
 
 Describe 'ConvertFrom-HotkeyText' {
@@ -81,12 +101,41 @@ Describe 'ConvertFrom-HotkeyText' {
         { ConvertFrom-HotkeyText 'Ctrl+@' } | Should Throw "Unknown key '@'"
     }
 
+    It 'rejects numbers, flag lists and things that are not keys' {
+        foreach ($text in 'Ctrl+65', 'Ctrl+KeyCode', 'Ctrl+Modifiers', 'Ctrl+ShiftKey', 'Ctrl+LButton') {
+            { ConvertFrom-HotkeyText $text } | Should Throw 'Unknown key'
+        }
+    }
+
     It 'rejects a hotkey without a key' {
         { ConvertFrom-HotkeyText 'Ctrl+Shift' } | Should Throw 'no key'
     }
 
     It 'rejects more than one key' {
         { ConvertFrom-HotkeyText 'Ctrl+A+B' } | Should Throw 'more than one key'
+    }
+}
+
+Describe 'Hotkey rules (Get-HotkeyProblem)' {
+    It 'refuses a plain key, which would block typing' {
+        { ConvertFrom-HotkeyText 'V' } | Should Throw 'plain key'
+    }
+
+    It 'accepts function keys alone, except F12' {
+        (ConvertFrom-HotkeyText 'F5').VirtualKey | Should Be 0x74
+        { ConvertFrom-HotkeyText 'F12' } | Should Throw 'reserved'
+    }
+
+    It 'refuses Shift plus a character key, but not Shift plus other keys' {
+        { ConvertFrom-HotkeyText 'Shift+A' } | Should Throw 'Shift plus'
+        { ConvertFrom-HotkeyText 'Shift+Space' } | Should Throw 'Shift plus'
+        (ConvertFrom-HotkeyText 'Shift+F5').VirtualKey | Should Be 0x74
+    }
+
+    It 'refuses Ctrl+Alt combinations that type a character with AltGr' -Skip:(-not $germanLayout) {
+        { ConvertFrom-HotkeyText 'Ctrl+Alt+Q' } | Should Throw 'AltGr'   # @
+        { ConvertFrom-HotkeyText 'Ctrl+Alt+7' } | Should Throw 'AltGr'   # {
+        (ConvertFrom-HotkeyText 'Ctrl+Alt+V').VirtualKey | Should Be 0x56
     }
 }
 
@@ -108,24 +157,178 @@ Describe 'Format-HotkeyText' {
     }
 
     It 'produces text that parses to the same hotkey' {
-        foreach ($hotkey in 'Ctrl+Shift+V', 'Ctrl+Oemtilde', 'Alt+F4', 'Win+Space', 'Ctrl+1', 'Ctrl+Oem2') {
-            $original = ConvertFrom-HotkeyText $hotkey
-            $roundTrip = ConvertFrom-HotkeyText (Format-HotkeyText $hotkey)
-            "$hotkey -> $($roundTrip.Modifiers)/$($roundTrip.VirtualKey)" |
-                Should Be "$hotkey -> $($original.Modifiers)/$($original.VirtualKey)"
+        foreach ($hotkeyText in 'Ctrl+Shift+V', 'Ctrl+Oemtilde', 'Alt+F4', 'Win+Space', 'Ctrl+1', 'Ctrl+Oem2') {
+            $original = ConvertFrom-HotkeyText $hotkeyText
+            $roundTrip = ConvertFrom-HotkeyText (Format-HotkeyText $hotkeyText)
+            "$hotkeyText -> $($roundTrip.Modifiers)/$($roundTrip.VirtualKey)" |
+                Should Be "$hotkeyText -> $($original.Modifiers)/$($original.VirtualKey)"
         }
     }
 }
 
 Describe 'ConvertTo-HotkeyText' {
     It 'builds the text from a key event' {
-        $keyEvent = [System.Windows.Forms.KeyEventArgs]::new([System.Windows.Forms.Keys]'Control, Shift, V')
-        ConvertTo-HotkeyText $keyEvent | Should BeExactly 'Ctrl+Shift+V'
+        ConvertTo-HotkeyText (New-KeyEvent 'Control, Shift, V') | Should BeExactly 'Ctrl+Shift+V'
     }
 
     It 'returns nothing while only modifiers are pressed' {
-        $keyEvent = [System.Windows.Forms.KeyEventArgs]::new([System.Windows.Forms.Keys]'ControlKey, Control')
-        ConvertTo-HotkeyText $keyEvent | Should BeNullOrEmpty
+        ConvertTo-HotkeyText (New-KeyEvent 'ControlKey, Control') | Should BeNullOrEmpty
+    }
+}
+
+Describe 'Edit-Hotkey' {
+    BeforeEach {
+        Reset-TestState
+        $script:Ui.ClipHost = New-ClipHostStub
+        Mock Set-Theme {}
+        Mock Test-DarkTheme { $true }
+    }
+
+    It 'restores the previous hotkey from its key code when the dialog is cancelled' {
+        Mock Show-HotkeyDialog { $false }
+        $State.HotkeySpec = [pscustomobject]@{ Modifiers = 2; VirtualKey = 0xC0 }
+        $State.HotkeyText = 'display text that must not be parsed again'
+        Edit-Hotkey
+        $Ui.ClipHost.Calls -join ', ' | Should BeExactly 'clear, set 2 192'
+        $State.HotkeyActive | Should Be $true
+        $Ui.Tray.Text | Should Match '^Clipboard history'
+    }
+
+    It 'leaves the hotkey off when it was off and the dialog is cancelled' {
+        Mock Show-HotkeyDialog { $false }
+        $State.HotkeyActive = $false
+        Edit-Hotkey
+        $Ui.ClipHost.Calls -join ', ' | Should BeExactly 'clear'
+        $State.HotkeyActive | Should Be $false
+        $Ui.Tray.Text | Should Match 'no hotkey'
+    }
+}
+
+Describe 'Update-HotkeyDialog' {
+    function New-DialogStub {
+        $ok = [pscustomobject]@{ Enabled = $false; Clicks = 0 }
+        $ok | Add-Member -MemberType ScriptMethod -Name PerformClick -Value { $this.Clicks++ }
+        @{
+            Form        = [pscustomobject]@{ DialogResult = 'None' }
+            KeyBox      = [pscustomobject]@{ Text = '' }
+            Hint        = [pscustomobject]@{ Text = '' }
+            Ok          = $ok
+            Pending     = $null
+            PendingText = $null
+        }
+    }
+
+    It 'accepts a valid combination' {
+        $dialog = New-DialogStub
+        Update-HotkeyDialog -Dialog $dialog -KeyEvent (New-KeyEvent 'Control, Shift, V')
+        $dialog.KeyBox.Text | Should BeExactly 'Ctrl+Shift+V'
+        $dialog.Pending.VirtualKey | Should Be 0x56
+        $dialog.Ok.Enabled | Should Be $true
+    }
+
+    It 'refuses the same combinations as the -Hotkey parameter' {
+        $dialog = New-DialogStub
+        Update-HotkeyDialog -Dialog $dialog -KeyEvent (New-KeyEvent 'A')
+        $dialog.Hint.Text | Should Match 'plain key'
+        $dialog.Ok.Enabled | Should Be $false
+
+        Update-HotkeyDialog -Dialog $dialog -KeyEvent (New-KeyEvent 'Shift, A')
+        $dialog.Hint.Text | Should Match 'Shift plus'
+        $dialog.Pending | Should BeNullOrEmpty
+    }
+
+    It 'refuses AltGr combinations' -Skip:(-not $germanLayout) {
+        $dialog = New-DialogStub
+        Update-HotkeyDialog -Dialog $dialog -KeyEvent (New-KeyEvent 'Control, Alt, Q')
+        $dialog.Hint.Text | Should Match 'AltGr'
+        $dialog.Ok.Enabled | Should Be $false
+    }
+
+    It 'ignores modifier keys pressed alone' {
+        $dialog = New-DialogStub
+        Update-HotkeyDialog -Dialog $dialog -KeyEvent (New-KeyEvent 'ControlKey, Control')
+        $dialog.KeyBox.Text | Should BeExactly ''
+    }
+
+    It 'cancels with Esc and applies with Enter only when OK is enabled' {
+        $dialog = New-DialogStub
+        Update-HotkeyDialog -Dialog $dialog -KeyEvent (New-KeyEvent 'Return')
+        $dialog.Ok.Clicks | Should Be 0
+
+        $dialog.Ok.Enabled = $true
+        Update-HotkeyDialog -Dialog $dialog -KeyEvent (New-KeyEvent 'Return')
+        $dialog.Ok.Clicks | Should Be 1
+
+        Update-HotkeyDialog -Dialog $dialog -KeyEvent (New-KeyEvent 'Escape')
+        $dialog.Form.DialogResult | Should Be 'Cancel'
+    }
+}
+
+Describe 'Read-ClipboardText' {
+    function New-Data {
+        param([string]$Text)
+        $data = [System.Windows.Forms.DataObject]::new()
+        if ($Text) { $data.SetText($Text) }
+        $data
+    }
+
+    function New-Flag {
+        param([byte[]]$Bytes)
+        [System.IO.MemoryStream]::new($Bytes)
+    }
+
+    It 'returns the text' {
+        Read-ClipboardText (New-Data 'hello') | Should BeExactly 'hello'
+    }
+
+    It 'returns nothing when there is no text' {
+        $data = New-Data
+        $data.SetData('Some Format', $false, (New-Flag 1, 2, 3))
+        Read-ClipboardText $data | Should BeNullOrEmpty
+    }
+
+    It 'ignores content marked ExcludeClipboardContentFromMonitorProcessing' {
+        $data = New-Data 'secret'
+        $data.SetData('ExcludeClipboardContentFromMonitorProcessing', $false, (New-Flag 0, 0, 0, 0))
+        Read-ClipboardText $data | Should BeNullOrEmpty
+    }
+
+    It 'ignores content with CanIncludeInClipboardHistory = 0' {
+        $data = New-Data 'secret'
+        $data.SetData('CanIncludeInClipboardHistory', $false, (New-Flag 0, 0, 0, 0))
+        Read-ClipboardText $data | Should BeNullOrEmpty
+    }
+
+    It 'keeps content with CanIncludeInClipboardHistory = 1' {
+        $data = New-Data 'text'
+        $data.SetData('CanIncludeInClipboardHistory', $false, (New-Flag 1, 0, 0, 0))
+        Read-ClipboardText $data | Should BeExactly 'text'
+    }
+
+    It 'reads CanIncludeInClipboardHistory as raw bytes, never as an object' {
+        # A serialized object (what an attacker would put there) comes back as bytes - nothing is
+        # deserialized - and the text is kept.
+        $data = New-Data 'text'
+        $data.SetData('CanIncludeInClipboardHistory', $false, [System.Collections.Generic.List[string]]::new())
+        $bytes = [PsClip.Native]::ReadFormatBytes($data, 'CanIncludeInClipboardHistory', 4096)
+        ($bytes -is [byte[]]) | Should Be $true
+        Read-ClipboardText $data | Should BeExactly 'text'
+    }
+}
+
+Describe 'ReadFormatBytes' {
+    It 'returns the raw bytes of a format' {
+        $data = [System.Windows.Forms.DataObject]::new()
+        $data.SetData('Test Format', $false, [System.IO.MemoryStream]::new([byte[]](1, 2, 3, 4)))
+        $bytes = [PsClip.Native]::ReadFormatBytes($data, 'Test Format', 64)
+        ($bytes[0..3] -join ',') | Should Be '1,2,3,4'
+    }
+
+    It 'returns nothing for a missing format or one larger than the limit' {
+        $data = [System.Windows.Forms.DataObject]::new()
+        $data.SetData('Test Format', $false, [System.IO.MemoryStream]::new([byte[]]::new(100)))
+        [PsClip.Native]::ReadFormatBytes($data, 'Other Format', 64) | Should BeNullOrEmpty
+        [PsClip.Native]::ReadFormatBytes($data, 'Test Format', 10) | Should BeNullOrEmpty
     }
 }
 
@@ -140,6 +343,12 @@ Describe 'Clipboard history' {
     It 'ignores empty and whitespace-only text' {
         Add-Entries '', " `r`n`t "
         $State.History.Count | Should Be 0
+    }
+
+    It 'skips texts longer than MaxEntryLength' {
+        $script:MaxEntryLength = 10
+        Add-Entries ('x' * 11), 'short'
+        $State.History -join '|' | Should BeExactly 'short'
     }
 
     It 'moves a re-copied entry to the top instead of duplicating it' {
@@ -205,7 +414,135 @@ Describe 'Clipboard history' {
         Clear-ClipboardHistory
         $State.History.Count | Should Be 0
         $State.Pinned -join '|' | Should BeExactly 'a'
-        $Ui.Tray.Text | Should Match '1 entries'
+        $Ui.Tray.Text | Should Match ': 1 entry \('
+    }
+}
+
+Describe 'Update-PopupList' {
+    BeforeEach {
+        Reset-TestState
+        # Real controls, never shown
+        $script:Ui.Search = [System.Windows.Forms.TextBox]::new()
+        $script:Ui.List = [System.Windows.Forms.ListBox]::new()
+        $script:Ui.Status = [System.Windows.Forms.Label]::new()
+        Add-Entries 'one', 'two', 'three'   # history: three, two, one
+        Switch-ClipboardPin 'one'
+    }
+
+    AfterEach {
+        $Ui.Search.Dispose()
+        $Ui.List.Dispose()
+        $Ui.Status.Dispose()
+    }
+
+    It 'shows the pinned entries first' {
+        Update-PopupList
+        $State.Filtered -join '|' | Should BeExactly 'one|three|two'
+        $State.FilteredPinnedCount | Should Be 1
+        $Ui.List.Items.Count | Should Be 3
+        $Ui.List.SelectedIndex | Should Be 0
+    }
+
+    It 'filters with the search text' {
+        $Ui.Search.Text = 'T'
+        Update-PopupList
+        $State.Filtered -join '|' | Should BeExactly 'three|two'
+        $State.FilteredPinnedCount | Should Be 0
+        $Ui.Status.Text | Should Match '^2 of 3'
+    }
+
+    It 'clamps the selected row' {
+        Update-PopupList -SelectIndex 10
+        $Ui.List.SelectedIndex | Should Be 2
+    }
+
+    It 'keeps the selected entry when a new one arrives' {
+        Update-PopupList -SelectIndex 1
+        $selected = Get-SelectedEntry
+        $selected | Should BeExactly 'three'
+
+        Add-ClipboardEntry 'four'
+        Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry $selected
+        Get-SelectedEntry | Should BeExactly 'three'
+    }
+
+    It 'says paste or copy depending on the target window' {
+        Update-PopupList
+        $Ui.Status.Text | Should Match 'Enter copy'
+        $State.PasteTarget = [IntPtr]1
+        Update-PopupList
+        $Ui.Status.Text | Should Match 'Enter paste'
+    }
+}
+
+Describe 'Hide-Popup' {
+    It 'clears the list so that no previews stay in the hidden window' {
+        Reset-TestState
+        $form = [pscustomobject]@{ Visible = $true; Hides = 0 }
+        $form | Add-Member -MemberType ScriptMethod -Name Hide -Value {
+            $this.Visible = $false
+            $this.Hides++
+        }
+        $script:Ui.Form = $form
+        $script:Ui.List = [System.Windows.Forms.ListBox]::new()
+        [void]$Ui.List.Items.Add('secret preview')
+        $State.Filtered.Add('secret')
+
+        Hide-Popup
+
+        $form.Hides | Should Be 1
+        $Ui.List.Items.Count | Should Be 0
+        $State.Filtered.Count | Should Be 0
+        $Ui.List.Dispose()
+    }
+}
+
+Describe 'Invoke-PopupKey' {
+    BeforeEach {
+        Reset-TestState
+        $script:Ui.List = [pscustomobject]@{ ClientSize = [System.Drawing.Size]::new(200, 300); ItemHeight = 30 }
+        Mock Hide-Popup {}
+        Mock Invoke-SelectedEntry {}
+        Mock Move-Selection {}
+        Mock Switch-SelectedPin {}
+        Mock Remove-SelectedEntry {}
+    }
+
+    It 'pastes with Enter (KeyCode Return) and closes with Esc' {
+        $enter = New-KeyEvent 'Return'
+        Invoke-PopupKey $enter
+        Invoke-PopupKey (New-KeyEvent 'Escape')
+        Assert-MockCalled Invoke-SelectedEntry -Exactly 1
+        Assert-MockCalled Hide-Popup -Exactly 1
+        $enter.Handled | Should Be $true
+        $enter.SuppressKeyPress | Should Be $true
+    }
+
+    It 'moves by one row with Up/Down and by a page with PgUp/PgDn' {
+        Invoke-PopupKey (New-KeyEvent 'Down')
+        Invoke-PopupKey (New-KeyEvent 'Up')
+        Invoke-PopupKey (New-KeyEvent 'PageDown')
+        Invoke-PopupKey (New-KeyEvent 'PageUp')
+        Assert-MockCalled Move-Selection -Exactly 1 -ParameterFilter { $Delta -eq 1 }
+        Assert-MockCalled Move-Selection -Exactly 1 -ParameterFilter { $Delta -eq -1 }
+        Assert-MockCalled Move-Selection -Exactly 1 -ParameterFilter { $Delta -eq 10 }
+        Assert-MockCalled Move-Selection -Exactly 1 -ParameterFilter { $Delta -eq -10 }
+    }
+
+    It 'pins with Ctrl+P, but lets a plain P through to the filter box' {
+        $plain = New-KeyEvent 'P'
+        Invoke-PopupKey $plain
+        Invoke-PopupKey (New-KeyEvent 'Control, P')
+        Assert-MockCalled Switch-SelectedPin -Exactly 1
+        $plain.Handled | Should Be $false
+    }
+
+    It 'removes with Shift+Delete, but lets a plain Delete through to the filter box' {
+        $plain = New-KeyEvent 'Delete'
+        Invoke-PopupKey $plain
+        Invoke-PopupKey (New-KeyEvent 'Shift, Delete')
+        Assert-MockCalled Remove-SelectedEntry -Exactly 1
+        $plain.Handled | Should Be $false
     }
 }
 
@@ -231,6 +568,22 @@ Describe 'Format-Preview' {
 
     It 'cuts long text to 300 characters' {
         (Format-Preview ('x' * 1000)).Length | Should Be 300
+    }
+
+    It 'skips long leading whitespace' {
+        Format-Preview ((' ' * 1000) + 'text') | Should BeExactly 'text'
+    }
+}
+
+Describe 'Update-TrayText' {
+    It 'counts entries in singular and plural' {
+        Reset-TestState
+        Add-Entries 'a'
+        Update-TrayText
+        $Ui.Tray.Text | Should BeExactly 'Clipboard history: 1 entry (Ctrl+Shift+V)'
+        Add-Entries 'b'
+        Update-TrayText
+        $Ui.Tray.Text | Should BeExactly 'Clipboard history: 2 entries (Ctrl+Shift+V)'
     }
 }
 

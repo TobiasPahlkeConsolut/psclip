@@ -4,20 +4,21 @@
 
 .DESCRIPTION
     Creates a "Clipboard Manager" shortcut in the Start menu and, with -Autostart, a second one
-    in the Startup folder, then (re)starts the manager. The shortcuts run ClipboardManager.ps1
-    from this folder through 'conhost.exe --headless', so no console window appears. (With
-    Windows Terminal as the default terminal, 'powershell -WindowStyle Hidden' would leave an
-    empty terminal window open.)
+    in the Startup folder, then starts the manager. The shortcuts run ClipboardManager.ps1 from
+    this folder through 'conhost.exe --headless', so no console window appears. (With Windows
+    Terminal as the default terminal, 'powershell -WindowStyle Hidden' would leave an empty
+    terminal window open.)
 
     Nothing is copied: keep this folder where it is, or run Install.ps1 again after moving it.
-    Running it again replaces the shortcuts, so it is also the way to change the settings.
+    Running it again replaces the shortcuts, so it is also the way to change the settings. If
+    psclip is already running, you are asked before it is restarted (its history would be lost).
 
 .PARAMETER Autostart
     Also start the manager when you sign in to Windows. Without it, an existing autostart
     shortcut is removed.
 
 .PARAMETER Hotkey
-    Passed on to ClipboardManager.ps1, e.g. 'Ctrl+Alt+V'.
+    Passed on to ClipboardManager.ps1, e.g. 'Ctrl+Alt+V'. Checked before anything is changed.
 
 .PARAMETER MaxItems
     Passed on to ClipboardManager.ps1.
@@ -32,7 +33,10 @@
     Passed on to ClipboardManager.ps1: start with "Keep awake" switched on.
 
 .PARAMETER KeepAwakeSeconds
-    Passed on to ClipboardManager.ps1: idle seconds before "Keep awake" presses Pause (default 30).
+    Passed on to ClipboardManager.ps1: idle seconds before "Keep awake" presses F15 (default 30).
+
+.PARAMETER Force
+    Restart a running psclip without asking.
 
 .PARAMETER Uninstall
     Stops a running instance and removes both shortcuts.
@@ -47,10 +51,12 @@
     .\Install.ps1 -Uninstall
 
 .NOTES
-    If the execution policy does not allow local scripts, run it as
+    Run it without administrator rights. If the execution policy does not allow local scripts:
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
-    The shortcuts always start the manager with -ExecutionPolicy Bypass (for that process only).
+    The shortcuts start the manager with -ExecutionPolicy Bypass (for that process only).
 #>
+
+#Requires -PSEdition Desktop
 
 [CmdletBinding(DefaultParameterSetName = 'Install')]
 param(
@@ -79,6 +85,9 @@ param(
     [ValidateRange(1, 3600)]
     [int]$KeepAwakeSeconds,
 
+    [Parameter(ParameterSetName = 'Install')]
+    [switch]$Force,
+
     [Parameter(ParameterSetName = 'Uninstall', Mandatory)]
     [switch]$Uninstall
 )
@@ -87,13 +96,15 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
 $managerScript = Join-Path $PSScriptRoot 'ClipboardManager.ps1'
-$powershellExe = Join-Path $PSHOME 'powershell.exe'
+# Not $PSHOME: under PowerShell 7 that folder has no powershell.exe.
+$powershellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $shortcutName = 'Clipboard Manager.lnk'
 $startMenuShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) $shortcutName
 $autostartShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) $shortcutName
-$hostWindowTitle = 'PsClipboardManager'   # hidden window of a running instance
+$hostWindowTitle = 'PsClipboardManager'   # hidden window of a running instance (its InstanceName)
 
-Add-Type -TypeDefinition @'
+if (-not ('InstallNative' -as [type])) {
+    Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
@@ -116,28 +127,74 @@ public static class InstallNative
     }
 }
 '@
+}
 
-function Get-ManagerWindow {
-    [InstallNative]::FindWindow([NullString]::Value, $hostWindowTitle)
+#region Functions
+
+function ConvertTo-CommandLineArgument {
+    # Quotes an argument so that powershell.exe (CommandLineToArgvW rules) reads it back unchanged.
+    param([string]$Value)
+
+    if ($Value -and $Value -notmatch '[\s"]') { return $Value }   # backslashes are literal here
+    # Inside quotes, backslashes are literal unless they come before a quote: double those.
+    $escaped = $Value -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+function Get-ShortcutArguments {
+    # Command line of the shortcuts: conhost --headless powershell.exe ... -File ClipboardManager.ps1 <settings>
+    param([System.Collections.IDictionary]$Settings)   # $PSBoundParameters or a hashtable
+
+    $arguments = @('--headless', $powershellExe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managerScript)
+    foreach ($name in 'Hotkey', 'MaxItems', 'Theme', 'Size', 'KeepAwakeSeconds') {
+        if ($Settings.Contains($name)) { $arguments += "-$name", [string]$Settings[$name] }
+    }
+    if ($Settings.Contains('KeepAwake') -and [bool]$Settings['KeepAwake']) { $arguments += '-KeepAwake' }
+
+    ($arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
+}
+
+function Assert-Hotkey {
+    # Checks the hotkey with the manager's own rules. Dot-sourcing inside this function keeps the
+    # manager's variables (its parameters, ...) out of this script.
+    param([string]$Text)
+
+    . $managerScript
+    $null = ConvertFrom-HotkeyText $Text
+}
+
+function Test-Elevated {
+    $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Get-ManagerProcessId {
+    # Process id of the running instance, or 0.
+    $window = [InstallNative]::FindWindow([NullString]::Value, $hostWindowTitle)
+    if ($window -eq [IntPtr]::Zero) { return 0 }
+    [InstallNative]::ProcessOf($window)
 }
 
 function Stop-ClipboardManager {
-    # Asks a running instance to exit; returns $true if one was running.
-    $window = Get-ManagerWindow
-    if ($window -eq [IntPtr]::Zero) { return $false }
+    # Asks the running instance to exit; returns $true once none is running.
+    $window = [InstallNative]::FindWindow([NullString]::Value, $hostWindowTitle)
+    if ($window -eq [IntPtr]::Zero) { return $true }
 
-    $process = Get-Process -Id ([InstallNative]::ProcessOf($window))
+    $processId = [InstallNative]::ProcessOf($window)
     [void][InstallNative]::PostMessage($window, 0x0010 <# WM_CLOSE #>, [IntPtr]::Zero, [IntPtr]::Zero)
-    if (-not $process.WaitForExit(5000)) {
-        Write-Warning 'The running clipboard manager did not exit. Close it via its tray icon.'
-    }
-    return $true
+    $process = Get-Process -Id $processId -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return $true }
+    return $process.WaitForExit(5000)
 }
 
 function Wait-ClipboardManager {
-    # Returns $true once a running instance is found (max. 15 s).
+    # Returns $true once an instance other than ExcludeProcessId runs (max. 15 s).
+    param([int]$ExcludeProcessId = 0)
+
     for ($i = 0; $i -lt 60; $i++) {
-        if ((Get-ManagerWindow) -ne [IntPtr]::Zero) { return $true }
+        $processId = Get-ManagerProcessId
+        if ($processId -ne 0 -and $processId -ne $ExcludeProcessId) { return $true }
         Start-Sleep -Milliseconds 250
     }
     return $false
@@ -147,41 +204,60 @@ function New-Shortcut {
     param([string]$Path, [string]$Arguments)
 
     $shell = New-Object -ComObject WScript.Shell
-    $shortcut = $shell.CreateShortcut($Path)
-    $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\conhost.exe'
-    $shortcut.Arguments = $Arguments
-    $shortcut.WorkingDirectory = $PSScriptRoot
-    $shortcut.IconLocation = "$powershellExe,0"
-    $shortcut.Description = 'Clipboard history (in memory only)'
-    $shortcut.Save()
-    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+    try {
+        $shortcut = $shell.CreateShortcut($Path)
+        $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\conhost.exe'
+        $shortcut.Arguments = $Arguments
+        $shortcut.WorkingDirectory = $PSScriptRoot
+        $shortcut.IconLocation = "$powershellExe,0"
+        $shortcut.Description = 'Clipboard history (in memory only)'
+        $shortcut.Save()
+    }
+    finally {
+        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+    }
 }
 
+function Confirm-Restart {
+    param([string]$Question)
+
+    try {
+        return $PSCmdlet.ShouldContinue($Question, 'Restart psclip')
+    }
+    catch {
+        return $false   # non-interactive: do not restart
+    }
+}
+
+#endregion
+
+# Dot-sourced (unit tests): only load the functions.
+if ($MyInvocation.InvocationName -eq '.') { return }
+
 if ($Uninstall) {
-    if (Stop-ClipboardManager) { Write-Host 'Stopped the running clipboard manager.' }
+    if (-not (Stop-ClipboardManager)) {
+        Write-Warning 'The running psclip did not exit. Exit it via its tray icon.'
+    }
     foreach ($path in $startMenuShortcut, $autostartShortcut) {
-        if (Test-Path $path) {
-            Remove-Item $path
+        if (Test-Path -LiteralPath $path) {
+            Remove-Item -LiteralPath $path
             Write-Host "Removed $path"
         }
     }
     return
 }
 
-if (-not (Test-Path $managerScript)) {
+if (Test-Elevated) {
+    throw ('Run Install.ps1 without administrator rights: psclip would start elevated, and with a ' +
+        'separate admin account the shortcuts would end up in that account.')
+}
+if (-not (Test-Path -LiteralPath $managerScript)) {
     throw "ClipboardManager.ps1 was not found next to Install.ps1 ($managerScript)."
 }
-Unblock-File $managerScript   # downloaded files are marked as coming from the internet
+Unblock-File -LiteralPath $managerScript, (Join-Path $PSScriptRoot 'PsClip.cs')   # downloaded files
+if ($PSBoundParameters.ContainsKey('Hotkey')) { Assert-Hotkey $Hotkey }
 
-$managerArguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"")
-if ($PSBoundParameters.ContainsKey('Hotkey')) { $managerArguments += '-Hotkey', "`"$Hotkey`"" }
-if ($PSBoundParameters.ContainsKey('MaxItems')) { $managerArguments += '-MaxItems', $MaxItems }
-if ($PSBoundParameters.ContainsKey('Theme')) { $managerArguments += '-Theme', $Theme }
-if ($PSBoundParameters.ContainsKey('Size')) { $managerArguments += '-Size', $Size }
-if ($KeepAwake) { $managerArguments += '-KeepAwake' }
-if ($PSBoundParameters.ContainsKey('KeepAwakeSeconds')) { $managerArguments += '-KeepAwakeSeconds', $KeepAwakeSeconds }
-$shortcutArguments = (@('--headless', "`"$powershellExe`"") + $managerArguments) -join ' '
-
+$shortcutArguments = Get-ShortcutArguments $PSBoundParameters
 New-Shortcut -Path $startMenuShortcut -Arguments $shortcutArguments
 Write-Host "Start menu shortcut: $startMenuShortcut"
 
@@ -189,18 +265,30 @@ if ($Autostart) {
     New-Shortcut -Path $autostartShortcut -Arguments $shortcutArguments
     Write-Host "Autostart shortcut:  $autostartShortcut"
 }
-elseif (Test-Path $autostartShortcut) {
-    Remove-Item $autostartShortcut
+elseif (Test-Path -LiteralPath $autostartShortcut) {
+    Remove-Item -LiteralPath $autostartShortcut
     Write-Host 'Removed the autostart shortcut (use -Autostart to keep it).'
 }
 
-if (Stop-ClipboardManager) { Write-Host 'Stopped the running instance to apply the new settings.' }
-Start-Process -FilePath $startMenuShortcut
+$runningId = Get-ManagerProcessId
+if ($runningId -ne 0) {
+    $question = 'psclip is running. Restart it now so that the new settings apply? ' +
+        'Its history and pinned entries will be lost.'
+    if (-not ($Force -or (Confirm-Restart $question))) {
+        Write-Host 'psclip keeps running with its current settings; the new ones apply the next time it starts.'
+        return
+    }
+    if (-not (Stop-ClipboardManager)) {
+        Write-Warning 'The running psclip did not exit. Exit it via its tray icon, then start "Clipboard Manager" from the Start menu.'
+        return
+    }
+}
 
-if (Wait-ClipboardManager) {
-    Write-Host 'The clipboard manager is running - look for its icon in the notification area of the taskbar.'
+Start-Process -FilePath $startMenuShortcut
+if (Wait-ClipboardManager -ExcludeProcessId $runningId) {
+    Write-Host 'psclip is running - look for its icon in the notification area of the taskbar.'
 }
 else {
-    Write-Warning ("The clipboard manager did not start. Run it in a console to see the error:`n" +
-        "  & `"$powershellExe`" $($managerArguments -join ' ')")
+    Write-Warning ("psclip did not start. Run it in a console to see the error:`n" +
+        "  & `"$powershellExe`" -NoProfile -ExecutionPolicy Bypass -File `"$managerScript`"")
 }

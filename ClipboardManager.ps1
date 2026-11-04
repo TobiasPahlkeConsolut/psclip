@@ -23,22 +23,27 @@
 
     Entries that the source application marks as private (password managers set the
     ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory formats) are
-    not recorded.
+    not recorded, nor are texts longer than MaxEntryLength.
 
     Unrelated to the clipboard: "Keep awake" in the tray menu (off by default) presses the
-    Pause key whenever there has been no mouse or keyboard input for KeepAwakeSeconds, so
-    Windows does not consider the session idle.
+    F15 key - which no program uses - whenever there has been no mouse or keyboard input for
+    KeepAwakeSeconds, so Windows does not consider the session idle.
 
 .PARAMETER Hotkey
     Global hotkey, e.g. 'Ctrl+Shift+V', 'Ctrl+Alt+H' or 'Ctrl+F12'. The key part is a
     System.Windows.Forms.Keys name (V, F12, Space, Oemtilde, 1, ...) or the character printed
     on the key, such as an umlaut on a German keyboard. It can also be changed from the tray
-    menu; that change lasts until the script exits.
+    menu; that change lasts until the script exits. Combinations that would get in the way of
+    typing are refused: a plain key (except F1-F11, F13-F24), Shift plus a character key, and
+    Ctrl+Alt plus a key that types a character with AltGr.
 
     The default, Ctrl+Oemtilde, is Ctrl+O-umlaut on a German keyboard and Ctrl+` on a US one.
 
 .PARAMETER MaxItems
     Number of unpinned entries to keep; the oldest are dropped.
+
+.PARAMETER MaxEntryLength
+    Texts with more characters than this are not recorded (default 1,000,000).
 
 .PARAMETER Theme
     Dark (default), Light, or Auto to follow the Windows app theme (checked each time the popup
@@ -53,7 +58,11 @@
     Start with "Keep awake" switched on (it can be switched in the tray menu).
 
 .PARAMETER KeepAwakeSeconds
-    Seconds without mouse or keyboard input after which "Keep awake" presses the Pause key.
+    Seconds without mouse or keyboard input after which "Keep awake" presses the F15 key.
+
+.PARAMETER InstanceName
+    Name of the instance's mutex and hidden window. Only needed to run a second, independent
+    instance next to the normal one, as the end-to-end test does.
 
 .EXAMPLE
     conhost.exe --headless powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\ClipboardManager.ps1
@@ -67,8 +76,10 @@
 
 .NOTES
     Stop it via the tray menu (Exit). Other programs can stop it gracefully by posting WM_CLOSE
-    to its hidden window titled 'PsClipboardManager'.
+    to its hidden window titled 'PsClipboardManager' (the InstanceName).
 #>
+
+#Requires -PSEdition Desktop
 
 using namespace System.Collections.Generic
 using namespace System.Drawing
@@ -81,6 +92,9 @@ param(
     [ValidateRange(1, 100000)]
     [int]$MaxItems = 200,
 
+    [ValidateRange(1, 100000000)]
+    [int]$MaxEntryLength = 1000000,
+
     [ValidateSet('Dark', 'Light', 'Auto')]
     [string]$Theme = 'Dark',
 
@@ -90,7 +104,10 @@ param(
     [switch]$KeepAwake,
 
     [ValidateRange(1, 3600)]
-    [int]$KeepAwakeSeconds = 30
+    [int]$KeepAwakeSeconds = 30,
+
+    [ValidatePattern('^[\w.-]{1,64}$')]
+    [string]$InstanceName = 'PsClipboardManager'
 )
 
 Set-StrictMode -Version 2.0
@@ -171,6 +188,9 @@ function ConvertFrom-HotkeyText {
     }
     if ($null -eq $key) { throw "Hotkey '$Text' has no key, only modifiers." }
 
+    $problem = Get-HotkeyProblem -Modifiers $modifiers -Key $key
+    if ($problem) { throw "Hotkey '$Text': $problem" }
+
     [pscustomobject]@{ Modifiers = [uint32]$modifiers; VirtualKey = [uint32]$key }
 }
 
@@ -179,18 +199,53 @@ function ConvertTo-Key {
     param([string]$Name)
 
     $keyName = if ($Name -match '^\d$') { "D$Name" } else { $Name }   # '1' -> Keys.D1
-    try {
-        $key = [Keys][Enum]::Parse([Keys], $keyName, $true)   # ignore case: 'f12' = 'F12'
-        if ($key -ne [Keys]::None) { return $key }
-    }
-    catch {
-        # Not a [Keys] name - maybe a character.
+    # Enum.Parse would also accept numbers ('65') and lists ('Shift, V'): only plain names here.
+    if ($keyName -match '^[A-Za-z][A-Za-z0-9]*$') {
+        try {
+            $key = [Keys][Enum]::Parse([Keys], $keyName, $true)   # ignore case: 'f12' = 'F12'
+            if (Test-KeyUsable $key) { return $key }
+        }
+        catch {
+            # Not a [Keys] name - maybe a character.
+        }
     }
     if ($Name.Length -eq 1) {
         $virtualKey = [PsClip.Native]::VirtualKeyOf($Name[0])
         if ($virtualKey -ge 0) { return [Keys]$virtualKey }
     }
     throw "Unknown key '$Name'. Use a System.Windows.Forms.Keys name such as V, F12 or Space, or the character on the key."
+}
+
+function Test-KeyUsable {
+    # A single real key: no mouse button, no modifier key on its own, no modifier flags (> 0xFF).
+    param([Keys]$Key)
+
+    $modifierKeys = [Keys]::ShiftKey, [Keys]::ControlKey, [Keys]::Menu, [Keys]::LWin, [Keys]::RWin,
+        [Keys]::LShiftKey, [Keys]::RShiftKey, [Keys]::LControlKey, [Keys]::RControlKey, [Keys]::LMenu, [Keys]::RMenu
+    [int]$Key -ge 8 -and [int]$Key -le 0xFF -and $Key -notin $modifierKeys
+}
+
+function Get-HotkeyProblem {
+    # Why a combination would get in the way of normal typing, or $null if it is fine.
+    param([uint32]$Modifiers, [Keys]$Key)
+
+    if ($Modifiers -eq 0) {
+        if ($Key -eq [Keys]::F12) { return 'F12 alone is reserved by Windows for debuggers.' }
+        if ($Key -lt [Keys]::F1 -or $Key -gt [Keys]::F24) {
+            return 'add Ctrl, Alt, Shift or Win - a plain key would block typing.'
+        }
+        return $null
+    }
+
+    $typesCharacter = $Key -eq [Keys]::Space -or [PsClip.Native]::CharacterOf([int]$Key) -ne [char]0
+    if ($Modifiers -eq $HotkeyModifiers.Shift -and $typesCharacter) {
+        return 'Shift plus this key types a character - the hotkey would block it.'
+    }
+    $ctrlAlt = $HotkeyModifiers.Ctrl -bor $HotkeyModifiers.Alt
+    if ($Modifiers -eq $ctrlAlt -and [PsClip.Native]::TypesCharacterWithAltGr([int]$Key)) {
+        return 'Ctrl+Alt is AltGr, which types a character with this key - the hotkey would block it.'
+    }
+    return $null
 }
 
 function Get-KeyDisplayName {
@@ -211,17 +266,23 @@ function Get-KeyDisplayName {
     return $name
 }
 
-function Format-HotkeyText {
-    # Normalized display text, e.g. 'ctrl+shift+v' -> 'Ctrl+Shift+V', 'Ctrl+Oemtilde' -> 'Ctrl+' + umlaut
-    param([string]$Text)
+function Format-HotkeySpec {
+    # Display text of a parsed hotkey, e.g. 'Ctrl+Shift+V', or 'Ctrl+' + umlaut for Ctrl+Oemtilde
+    # on a German keyboard.
+    param($Spec)
 
-    $spec = ConvertFrom-HotkeyText $Text
     $parts = @()
     foreach ($modifier in 'Ctrl', 'Alt', 'Shift', 'Win') {
-        if ($spec.Modifiers -band $HotkeyModifiers[$modifier]) { $parts += $modifier }
+        if ($Spec.Modifiers -band $HotkeyModifiers[$modifier]) { $parts += $modifier }
     }
-    $parts += Get-KeyDisplayName ([Keys]$spec.VirtualKey)
+    $parts += Get-KeyDisplayName ([Keys]$Spec.VirtualKey)
     $parts -join '+'
+}
+
+function Format-HotkeyText {
+    # Normalized display text, e.g. 'ctrl+shift+v' -> 'Ctrl+Shift+V'
+    param([string]$Text)
+    Format-HotkeySpec (ConvertFrom-HotkeyText $Text)
 }
 
 function ConvertTo-HotkeyText {
@@ -241,15 +302,17 @@ function ConvertTo-HotkeyText {
 }
 
 function Register-Hotkey {
-    # Returns $false if the combination is already used by another program.
-    param([string]$Text)
+    # Takes a parsed hotkey (ConvertFrom-HotkeyText). Returns $false if the combination is
+    # already used by another program.
+    param($Spec)
 
-    $spec = ConvertFrom-HotkeyText $Text
-    if (-not $Ui.ClipHost.SetHotkey($spec.Modifiers, $spec.VirtualKey)) { return $false }
+    if (-not $Ui.ClipHost.SetHotkey($Spec.Modifiers, $Spec.VirtualKey)) { return $false }
 
-    $State.HotkeyText = Format-HotkeyText $Text
+    # Keep the key code, not the text: the text depends on the current keyboard layout.
+    $State.HotkeySpec = $Spec
+    $State.HotkeyText = Format-HotkeySpec $Spec
     $State.HotkeyActive = $true
-    Write-Verbose "Hotkey $Text registered."
+    Write-Verbose "Hotkey $($State.HotkeyText) registered."
     return $true
 }
 
@@ -259,10 +322,14 @@ function Edit-Hotkey {
     $Ui.ClipHost.ClearHotkey()   # so that the current combination can be pressed in the dialog
     $State.HotkeyActive = $false
 
-    if (-not (Show-HotkeyDialog) -and $wasActive) {
-        [void](Register-Hotkey $State.HotkeyText)   # cancelled: restore the previous hotkey
+    try {
+        if (-not (Show-HotkeyDialog) -and $wasActive) {
+            [void](Register-Hotkey $State.HotkeySpec)   # cancelled: restore the previous hotkey
+        }
     }
-    Update-TrayText
+    finally {
+        Update-TrayText
+    }
 }
 
 function Show-HotkeyDialog {
@@ -319,7 +386,14 @@ function Show-HotkeyDialog {
     $form.Controls.AddRange([Control[]]@($prompt, $keyBox, $hint, $ok, $cancel))
 
     # The handlers run during ShowDialog, while the variables of this function still exist.
-    $dialog = @{ Form = $form; KeyBox = $keyBox; Hint = $hint; Ok = $ok; Pending = $null }
+    $dialogControls = @{
+        Form        = $form
+        KeyBox      = $keyBox
+        Hint        = $hint
+        Ok          = $ok
+        Pending     = $null   # parsed hotkey waiting for OK
+        PendingText = $null
+    }
 
     $keyBox.add_PreviewKeyDown({
         param($source, $e)
@@ -327,21 +401,21 @@ function Show-HotkeyDialog {
     })
     $keyBox.add_KeyDown({
         param($source, $e)
-        Update-HotkeyDialog -Dialog $dialog -KeyEvent $e
+        Update-HotkeyDialog -Dialog $dialogControls -KeyEvent $e
     })
     $ok.add_Click({
-        if (Register-Hotkey $dialog.Pending) {
-            $dialog.Form.DialogResult = 'OK'
+        if (Register-Hotkey $dialogControls.Pending) {
+            $dialogControls.Form.DialogResult = 'OK'
         }
         else {
-            $dialog.Hint.Text = "$($dialog.Pending) is already used by another program. Try another one."
-            $dialog.Ok.Enabled = $false
+            $dialogControls.Hint.Text = "$($dialogControls.PendingText) is already used by another program. Try another one."
+            $dialogControls.Ok.Enabled = $false
         }
     })
     $form.add_Shown({
-        [void][PsClip.Native]::ForceForeground($dialog.Form.Handle)
-        $dialog.Form.Activate()
-        [void]$dialog.KeyBox.Focus()
+        [void][PsClip.Native]::ForceForeground($dialogControls.Form.Handle)
+        $dialogControls.Form.Activate()
+        [void]$dialogControls.KeyBox.Focus()
     })
 
     [PsClip.Native]::SetDarkTitleBar($form.Handle, $State.IsDark)
@@ -368,13 +442,19 @@ function Update-HotkeyDialog {
         if ($Dialog.Ok.Enabled) { $Dialog.Ok.PerformClick() }
         return
     }
-    if ($text -notmatch '\+' -and $text -notmatch '^F\d+$') {
-        $Dialog.Hint.Text = 'Add Ctrl, Alt, Shift or Win - a plain key would block typing.'
+
+    # Same rules as for the -Hotkey parameter (ConvertFrom-HotkeyText).
+    $Dialog.KeyBox.Text = $text
+    try {
+        $Dialog.Pending = ConvertFrom-HotkeyText $text
+    }
+    catch {
+        $Dialog.Pending = $null
+        $Dialog.Hint.Text = $_.Exception.Message
+        $Dialog.Ok.Enabled = $false
         return
     }
-
-    $Dialog.Pending = $text
-    $Dialog.KeyBox.Text = $text
+    $Dialog.PendingText = $text
     $Dialog.Hint.Text = 'Press Enter or click OK to apply.'
     $Dialog.Ok.Enabled = $true
 }
@@ -399,25 +479,25 @@ function New-FlatButton {
 
 function Read-ClipboardText {
     # Returns the clipboard text, or $null if there is none or the source app marked it as private.
-    $data = [Clipboard]::GetDataObject()
-    if ($null -eq $data) { return $null }
+    param($Data = [Clipboard]::GetDataObject())
 
-    if ($data.GetDataPresent('ExcludeClipboardContentFromMonitorProcessing') -or
-        $data.GetDataPresent('Clipboard Viewer Ignore')) {
+    if ($null -eq $Data) { return $null }
+
+    if ($Data.GetDataPresent('ExcludeClipboardContentFromMonitorProcessing') -or
+        $Data.GetDataPresent('Clipboard Viewer Ignore')) {
         Write-Verbose 'Ignored clipboard content marked as private.'
         return $null
     }
-    if ($data.GetDataPresent('CanIncludeInClipboardHistory')) {
-        $flag = $data.GetData('CanIncludeInClipboardHistory')
-        if ($flag -is [System.IO.MemoryStream] -and $flag.Length -ge 4 -and
-            [BitConverter]::ToInt32($flag.ToArray(), 0) -eq 0) {
-            Write-Verbose 'Ignored clipboard content excluded from clipboard history.'
-            return $null
-        }
+    # A DWORD 0 means "keep out of clipboard histories". Never read it with $Data.GetData():
+    # for custom formats that deserializes whatever another program (or an RDP session) put there.
+    $flag = [PsClip.Native]::ReadFormatBytes($Data, 'CanIncludeInClipboardHistory', 64)
+    if ($null -ne $flag -and $flag.Length -ge 4 -and [BitConverter]::ToInt32($flag, 0) -eq 0) {
+        Write-Verbose 'Ignored clipboard content excluded from clipboard history.'
+        return $null
     }
-    if (-not $data.GetDataPresent([DataFormats]::UnicodeText)) { return $null }
+    if (-not $Data.GetDataPresent([DataFormats]::UnicodeText)) { return $null }
 
-    return [string]$data.GetData([DataFormats]::UnicodeText)
+    return [string]$Data.GetData([DataFormats]::UnicodeText)
 }
 
 function Receive-ClipboardChange {
@@ -430,15 +510,23 @@ function Receive-ClipboardChange {
     }
     if ($null -eq $text) { return }
 
+    $selected = Get-SelectedEntry
     Add-ClipboardEntry $text
     Update-TrayText
-    if ($Ui.Form.Visible) { Update-PopupList $Ui.List.SelectedIndex }
+    if ($Ui.Form.Visible) {
+        # Keep the same entry selected, not the same row: the new entry shifts the list.
+        Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry $selected
+    }
 }
 
 function Add-ClipboardEntry {
     param([string]$Text)
 
     if ([string]::IsNullOrWhiteSpace($Text)) { return }
+    if ($Text.Length -gt $MaxEntryLength) {
+        Write-Verbose "Skipped entry with $($Text.Length) chars (MaxEntryLength $MaxEntryLength)."
+        return
+    }
     if ($State.Pinned.Contains($Text)) { return }   # pinned entries keep their place
 
     [void]$State.History.Remove($Text)              # a re-copied entry moves to the top
@@ -535,6 +623,11 @@ function Show-PopupLater {
 
 function Hide-Popup {
     if ($Ui.Form.Visible) { $Ui.Form.Hide() }
+
+    # Do not leave previews of the history in the hidden list: other programs could read them.
+    $Ui.List.Items.Clear()
+    $State.Filtered = [List[string]]::new()
+    $State.FilteredPinnedCount = 0
 }
 
 function Switch-Popup {
@@ -547,8 +640,9 @@ function Switch-Popup {
 }
 
 function Update-PopupList {
-    # Refills the list from the pinned entries and the history, applying the filter text.
-    param([int]$SelectIndex = 0)
+    # Refills the list from the pinned entries and the history, applying the filter text. Selects
+    # SelectEntry if it is still shown, otherwise the row SelectIndex (clamped).
+    param([int]$SelectIndex = 0, $SelectEntry = $null)
 
     $terms = $Ui.Search.Text.Split([char[]]@(' ', "`t"), [StringSplitOptions]::RemoveEmptyEntries)
     $found = [List[string]]::new()
@@ -570,7 +664,13 @@ function Update-PopupList {
     }
     $list.EndUpdate()
     if ($found.Count -gt 0) {
-        $list.SelectedIndex = [Math]::Max(0, [Math]::Min($SelectIndex, $found.Count - 1))
+        $entryIndex = if ($null -ne $SelectEntry) { $found.IndexOf($SelectEntry) } else { -1 }
+        $list.SelectedIndex = if ($entryIndex -ge 0) {
+            $entryIndex
+        }
+        else {
+            [Math]::Max(0, [Math]::Min($SelectIndex, $found.Count - 1))
+        }
     }
 
     $action = if ($State.PasteTarget -ne [IntPtr]::Zero) { 'paste' } else { 'copy' }
@@ -595,10 +695,13 @@ function Test-FilterMatch {
 }
 
 function Format-Preview {
-    # One-line preview for the list; the full text is used when pasting.
+    # One-line preview for the list; the full text is used when pasting. Looks only at the start
+    # of the text: entries can be megabytes long and this runs on every list refresh.
     param([string]$Text)
 
-    $preview = $Text.Trim()
+    $start = 0
+    while ($start -lt $Text.Length -and [char]::IsWhiteSpace($Text[$start])) { $start++ }
+    $preview = $Text.Substring($start, [Math]::Min(400, $Text.Length - $start)).TrimEnd()
     if ($preview.Length -gt 300) { $preview = $preview.Substring(0, 300) }
     $preview = $preview -replace '\r\n?|\n', $LineBreakMark
     $preview -replace '[ \t]+', ' '
@@ -634,12 +737,19 @@ function Invoke-SelectedEntry {
         return
     }
 
+    if ($target -eq [IntPtr]::Zero) { return }   # copy mode
+
     # Only send Ctrl+V if the original window is really back in front - never into another one.
-    if ($target -ne [IntPtr]::Zero -and
-        [PsClip.Native]::IsWindow($target) -and
-        [PsClip.Native]::ForceForeground($target)) {
+    # PasteInto checks that again right before sending.
+    $pasted = $false
+    if ([PsClip.Native]::IsWindow($target) -and [PsClip.Native]::ForceForeground($target)) {
         Start-Sleep -Milliseconds 50
-        [PsClip.Native]::SendCtrlV()
+        $pasted = [PsClip.Native]::PasteInto($target)
+    }
+    Write-Verbose "Paste into the previous window: $(if ($pasted) { 'sent Ctrl+V' } else { 'not sent' })."
+    if (-not $pasted) {
+        $Ui.Tray.ShowBalloonTip(4000, 'Clipboard history',
+            'Not pasted - the target window was not in front. The entry is on the clipboard: press Ctrl+V.', 'Info')
     }
 }
 
@@ -806,12 +916,13 @@ function Set-KeepAwake {
 }
 
 function Invoke-KeepAwakeCheck {
-    # Every second: after KeepAwakeSeconds without mouse or keyboard input, press Pause - a key
-    # hardly any program reacts to - so that Windows does not consider the session idle.
+    # Every second: after KeepAwakeSeconds without mouse or keyboard input, press F15 - a key no
+    # keyboard has and no program uses (Pause would freeze the output of console windows) - so
+    # that Windows does not consider the session idle.
     if (-not (Test-KeepAwakeDue ([PsClip.Native]::GetIdleMilliseconds()))) { return }
 
-    [PsClip.Native]::PressKey(0x13)   # VK_PAUSE
-    Write-Verbose 'Keep awake: pressed Pause.'
+    [PsClip.Native]::PressKey(0x7E)   # VK_F15
+    Write-Verbose 'Keep awake: pressed F15.'
 }
 
 function Test-KeepAwakeDue {
@@ -1006,7 +1117,7 @@ function New-TrayIcon {
     [void]$menu.Items.Add([ToolStripSeparator]::new())
 
     $Ui.KeepAwakeMenuItem = $menu.Items.Add('Keep awake')
-    $Ui.KeepAwakeMenuItem.ToolTipText = "Presses the Pause key after $KeepAwakeSeconds s without mouse or keyboard input"
+    $Ui.KeepAwakeMenuItem.ToolTipText = "Presses the F15 key after $KeepAwakeSeconds s without mouse or keyboard input"
     $Ui.KeepAwakeMenuItem.add_Click({ Set-KeepAwake (-not $State.KeepAwake) })
     [void]$menu.Items.Add([ToolStripSeparator]::new())
 
@@ -1039,17 +1150,19 @@ function Update-TrayText {
     $hotkeyLabel = if ($State.HotkeyActive) { $State.HotkeyText } else { 'no hotkey' }
     $Ui.HotkeyMenuItem.Text = "Change hotkey ($hotkeyLabel)..."
 
-    $text = "Clipboard history: $($State.Pinned.Count + $State.History.Count) entries ($hotkeyLabel)"
+    $count = $State.Pinned.Count + $State.History.Count
+    $entries = if ($count -eq 1) { '1 entry' } else { "$count entries" }
+    $text = "Clipboard history: $entries ($hotkeyLabel)"
     if ($text.Length -gt 63) { $text = $text.Substring(0, 63) }   # NotifyIcon limit
     $Ui.Tray.Text = $text
 }
 
 function New-ClipboardIcon {
     # Draws a small clipboard so the tray icon is not confused with other PowerShell windows.
-    $size = [SystemInformation]::SmallIconSize.Width
-    $u = $size / 16.0
+    $iconSize = [SystemInformation]::SmallIconSize.Width
+    $u = $iconSize / 16.0
 
-    $bitmap = [Bitmap]::new($size, $size)
+    $bitmap = [Bitmap]::new($iconSize, $iconSize)
     $graphics = [Graphics]::FromImage($bitmap)
     $graphics.SmoothingMode = 'AntiAlias'
     $board = [SolidBrush]::new([Color]::FromArgb(43, 108, 176))
@@ -1065,11 +1178,17 @@ function New-ClipboardIcon {
     $graphics.Dispose()
     $board.Dispose()
     $clip.Dispose()
-    [Icon]::FromHandle($bitmap.GetHicon())
+
+    # The clone owns its own icon handle, so the temporary one can be released right away.
+    $handle = $bitmap.GetHicon()
+    $icon = [Icon]([Icon]::FromHandle($handle).Clone())
+    [void][PsClip.Native]::DestroyIcon($handle)
+    $bitmap.Dispose()
+    $icon
 }
 
 function Start-ClipboardListener {
-    $Ui.ClipHost = [PsClip.ClipboardHost]::new('PsClipboardManager')
+    $Ui.ClipHost = [PsClip.ClipboardHost]::new($InstanceName)
     $Ui.ClipHost.add_ClipboardChanged({ Receive-ClipboardChange })
     $Ui.ClipHost.add_HotkeyPressed({ Switch-Popup })
     $Ui.ClipHost.add_CloseRequested({ $Ui.AppContext.ExitThread() })
@@ -1082,10 +1201,10 @@ function Start-ClipboardListener {
 # Dot-sourced (". .\ClipboardManager.ps1", used by the unit tests): only load the functions.
 if ($MyInvocation.InvocationName -eq '.') { return }
 
-$null = ConvertFrom-HotkeyText $Hotkey   # fail early on an invalid hotkey
+$hotkeySpec = ConvertFrom-HotkeyText $Hotkey   # fails early on an invalid hotkey
 
-# One instance per user session
-$mutex = [System.Threading.Mutex]::new($false, 'Local\PsClipboardManager')
+# One instance per user session (per InstanceName)
+$mutex = [System.Threading.Mutex]::new($false, "Local\$InstanceName")
 try {
     $ownsMutex = $mutex.WaitOne(0)
 }
@@ -1104,7 +1223,8 @@ $State = @{
     Filtered            = [List[string]]::new()   # entries currently shown in the popup
     FilteredPinnedCount = 0
     PasteTarget         = [IntPtr]::Zero          # window to paste into; zero = copy only
-    HotkeyText          = Format-HotkeyText $Hotkey   # as shown to the user
+    HotkeySpec          = $hotkeySpec             # modifiers and key code, independent of the layout
+    HotkeyText          = Format-HotkeySpec $hotkeySpec   # as shown to the user
     HotkeyActive        = $false
     ThemeSetting        = $Theme                  # Dark, Light or Auto; the tray menu switches it
     PopupSize           = $Size                   # S, M or L; the tray menu changes it
@@ -1125,7 +1245,7 @@ try {
     Start-ClipboardListener
     Initialize-KeepAwake
 
-    $hotkeyOk = Register-Hotkey $Hotkey
+    $hotkeyOk = Register-Hotkey $hotkeySpec
     try {
         $initial = Read-ClipboardText
         if ($null -ne $initial) { Add-ClipboardEntry $initial }
@@ -1146,13 +1266,15 @@ try {
     [Application]::Run($Ui.AppContext)
 }
 finally {
-    if ($Ui.KeepAwakeTimer) { $Ui.KeepAwakeTimer.Dispose() }
-    if ($Ui.Tray) {
+    # ContainsKey, not $Ui.Name: under StrictMode a missing key would throw here and hide the
+    # error that stopped the startup.
+    if ($Ui.ContainsKey('KeepAwakeTimer')) { $Ui.KeepAwakeTimer.Dispose() }
+    if ($Ui.ContainsKey('Tray')) {
         $Ui.Tray.Visible = $false
         $Ui.Tray.Dispose()
     }
-    if ($Ui.ClipHost) { $Ui.ClipHost.Dispose() }
-    if ($Ui.Form) { $Ui.Form.Dispose() }
+    if ($Ui.ContainsKey('ClipHost')) { $Ui.ClipHost.Dispose() }
+    if ($Ui.ContainsKey('Form')) { $Ui.Form.Dispose() }
     $mutex.ReleaseMutex()
     $mutex.Dispose()
     Write-Verbose 'Stopped.'

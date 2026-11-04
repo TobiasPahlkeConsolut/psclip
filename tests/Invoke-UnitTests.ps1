@@ -26,5 +26,5 @@ if (-not $pester) { throw 'Pester 3 or 4 is required (Windows ships with Pester 
 Remove-Module Pester -ErrorAction SilentlyContinue
 Import-Module $pester.Path
 
-$result = Invoke-Pester -Script (Join-Path $PSScriptRoot 'ClipboardManager.Tests.ps1') -PassThru
+$result = Invoke-Pester -Script $PSScriptRoot -PassThru   # all *.Tests.ps1 in this folder
 exit $result.FailedCount

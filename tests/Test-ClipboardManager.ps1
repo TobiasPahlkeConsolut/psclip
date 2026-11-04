@@ -10,7 +10,11 @@
 
     The test briefly opens windows and sends key presses - do not type, click or move the mouse
     while it runs (about 45 seconds). Real keystrokes are only sent after checking that the expected window
-    is in the foreground. The clipboard text is saved before and restored afterwards.
+    is in the foreground. The clipboard (text, image, file list) is saved before and restored afterwards.
+
+    It starts its own instance (-InstanceName PsClipboardManagerTest, its own hotkey) and only ever
+    talks to and closes that process, so a psclip you are using keeps running. That psclip does
+    record what the test copies: entries starting with "psclip test:".
 
     Screenshots of the popup, the tray menu and the hotkey dialog are written to
     -OutputDirectory, together with the manager's log.
@@ -370,6 +374,60 @@ function Save-MenuImages {
     }
 }
 
+function Find-ManagerWindow {
+    # Top-level window of the test instance with this title - never one of another psclip.
+    param([string]$Title)
+
+    foreach ($window in [TestNative]::TopLevelWindowsOf($manager.Id)) {
+        if ([TestNative]::TitleOf($window) -eq $Title) { return $window }
+    }
+    [IntPtr]::Zero
+}
+
+function Save-Clipboard {
+    # Text, image, file list and whether the content was marked private.
+    $saved = @{ Text = $null; Image = $null; Files = $null; Private = $false }
+    $data = [Clipboard]::GetDataObject()
+    if ($null -eq $data) { return $saved }
+
+    if ($data.GetDataPresent([DataFormats]::UnicodeText)) { $saved.Text = [string]$data.GetData([DataFormats]::UnicodeText) }
+    if ($data.GetDataPresent([DataFormats]::Bitmap)) { $saved.Image = [Clipboard]::GetImage() }
+    if ($data.GetDataPresent([DataFormats]::FileDrop)) { $saved.Files = [Clipboard]::GetFileDropList() }
+    $saved.Private = $data.GetDataPresent('ExcludeClipboardContentFromMonitorProcessing') -or
+        $data.GetDataPresent('CanIncludeInClipboardHistory')
+    $saved
+}
+
+function Restore-Clipboard {
+    param([hashtable]$Saved)
+
+    $data = [DataObject]::new()
+    $hasContent = $false
+    if ($Saved.Text) {
+        $data.SetText($Saved.Text)
+        $hasContent = $true
+    }
+    if ($Saved.Image) {
+        $data.SetImage($Saved.Image)
+        $hasContent = $true
+    }
+    if ($Saved.Files -and $Saved.Files.Count -gt 0) {
+        $data.SetFileDropList($Saved.Files)
+        $hasContent = $true
+    }
+    if (-not $hasContent) {
+        [Clipboard]::Clear()
+        return
+    }
+    if ($Saved.Private) {
+        # Keep it out of clipboard histories again (Win+V, cloud clipboard, psclip itself).
+        foreach ($format in 'ExcludeClipboardContentFromMonitorProcessing', 'CanIncludeInClipboardHistory', 'CanUploadToCloudClipboard') {
+            $data.SetData($format, $false, [System.IO.MemoryStream]::new([byte[]](0, 0, 0, 0)))
+        }
+    }
+    [Clipboard]::SetDataObject($data, $true)
+}
+
 #endregion
 
 $keyDown = 0x28
@@ -378,22 +436,33 @@ $keyRight = 0x27
 $keyEnter = 0x0D
 $keepAwakeSeconds = 2   # short, so that the keep-awake step takes seconds instead of minutes
 
+# The test instance: own name (mutex, hidden window) and own hotkey, so it runs next to a psclip in use.
+$instanceName = 'PsClipboardManagerTest'
+$testHotkey = @{ Text = 'Ctrl+Alt+Shift+F8'; Modifiers = 0x7; VirtualKey = 0x77 }
+
 [void][TestNative]::SetProcessDPIAware()
 $screen = [System.Drawing.Graphics]::FromHwnd([IntPtr]::Zero)
 $scale = $screen.DpiX / 96.0
 $screen.Dispose()
 
+if ([TestNative]::FindWindow([NullString]::Value, $instanceName) -ne [IntPtr]::Zero) {
+    throw "A test instance ($instanceName) is still running - close it first."
+}
+if (-not (Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey)) {
+    throw "The test hotkey $($testHotkey.Text) is used by another program."
+}
+
 $managerScript = (Resolve-Path (Join-Path $PSScriptRoot '..\ClipboardManager.ps1')).Path
 [void](New-Item -ItemType Directory -Force -Path $OutputDirectory)
 $log = Join-Path $OutputDirectory 'manager.log'
 $errorLog = Join-Path $OutputDirectory 'manager.err.log'
-$savedClipboard = Get-Clipboard -Raw
+$savedClipboard = Save-Clipboard
 
-Set-Clipboard -Value 'initial entry'
+Set-Clipboard -Value 'psclip test: initial entry'
 $manager = Start-Process powershell.exe -NoNewWindow -PassThru `
     -RedirectStandardOutput $log -RedirectStandardError $errorLog `
     -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"", '-Theme', $Theme,
-    '-KeepAwakeSeconds', $keepAwakeSeconds, '-Verbose'
+    '-KeepAwakeSeconds', $keepAwakeSeconds, '-InstanceName', $instanceName, '-Hotkey', $testHotkey.Text, '-Verbose'
 
 # The window the popup pastes into
 $target = [Form]::new()
@@ -407,15 +476,16 @@ $target.Controls.Add($targetBox)
 
 try {
     # --- start ---
-    $started = Wait-Until { (Test-Path $log) -and ((Get-Content $log -Raw) -match 'Running') } 15000
+    # Case-sensitive: "...already running." from an instance that exits must not count.
+    $started = Wait-Until { (Test-Path $log) -and ((Get-Content $log -Raw) -cmatch 'Running \(PID') } 15000
     Add-Result 'Manager starts' $started
-    if (-not $started) { throw "The manager did not start, see $errorLog" }
-    $hostWindow = [TestNative]::FindWindow([NullString]::Value, 'PsClipboardManager')
-    $popup = [TestNative]::FindWindow([NullString]::Value, 'Clipboard history')
-    Add-Result 'Default hotkey Ctrl+Oemtilde registered' (-not (Test-HotkeyFree 0x2 0xC0))
+    if (-not $started) { throw "The manager did not start, see $log and $errorLog" }
+    $hostWindow = Find-ManagerWindow $instanceName
+    $popup = Find-ManagerWindow 'Clipboard history'
+    Add-Result "Hotkey $($testHotkey.Text) registered" (-not (Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey))
 
     # --- clipboard capture ---
-    foreach ($text in 'alpha test entry', "beta line one`r`nline two", 'gamma & <special> chars', 'alpha test entry') {
+    foreach ($text in 'psclip test: alpha', "psclip test: beta line one`r`nline two", 'psclip test: gamma & <special> chars', 'psclip test: alpha') {
         Set-Clipboard -Value $text
         Wait-Milliseconds 300
     }
@@ -441,8 +511,11 @@ try {
     if (-not $popupShown) { throw 'The popup did not come to the foreground.' }
 
     $listBox = [TestNative]::ChildByClass($popup, 'LISTBOX')
-    $searchBox = [TestNative]::FocusOf($popup)
-    $expected = "alpha test entry|gamma & <special> chars|beta line one $([char]0x21B5) line two|initial entry"
+    # By class, not by asking for the focus: right after the popup appears, the focus may still
+    # be on the list for a moment.
+    $searchBox = [TestNative]::ChildByClass($popup, 'EDIT')
+    $expected = "psclip test: alpha|psclip test: gamma & <special> chars|" +
+        "psclip test: beta line one $([char]0x21B5) line two|psclip test: initial entry"
     $items = [TestNative]::ListBoxItems($listBox) -join '|'
     Add-Result 'Popup lists entries newest first' ($items -eq $expected) $items
     Save-WindowImage $popup "popup-$Theme.png"
@@ -453,7 +526,7 @@ try {
     }
     Wait-Milliseconds 300
     $items = @([TestNative]::ListBoxItems($listBox))
-    Add-Result 'Filter text narrows the list' ($items.Count -eq 1 -and $items[0] -like 'gamma*') ($items -join '|')
+    Add-Result 'Filter text narrows the list' ($items.Count -eq 1 -and $items[0] -like '*gamma*') ($items -join '|')
     [TestNative]::SetText($searchBox, '')
     Wait-Milliseconds 200
 
@@ -465,7 +538,7 @@ try {
         [TestNative]::PressKeys(0x11, 0x50)   # Ctrl+P
         Wait-Milliseconds 400
         $items = @([TestNative]::ListBoxItems($listBox))
-        Add-Result 'Ctrl+P pins the entry to the top' ($items[0] -like 'beta*') ($items -join '|')
+        Add-Result 'Ctrl+P pins the entry to the top' ($items[0] -like '*beta*') ($items -join '|')
         Save-WindowImage $popup "popup-pinned-$Theme.png"
     }
     else {
@@ -476,7 +549,7 @@ try {
     Send-PostedKey $searchBox $keyDown   # -> 'alpha' (below the pinned entry)
     Wait-Milliseconds 200
     Send-PostedKey $searchBox $keyEnter
-    $pasted = Wait-Until { $targetBox.Text -eq 'alpha test entry' }
+    $pasted = Wait-Until { $targetBox.Text -eq 'psclip test: alpha' }
     Add-Result 'Enter pastes into the previously active window' $pasted "target text: '$($targetBox.Text)'"
 
     # --- popup size: medium by default, manual resizing is reset on the next opening ---
@@ -520,7 +593,7 @@ try {
     $dialogShown = $false
     if ((Open-TrayMenu) -and (Send-MenuKeys $keyDown, $keyDown, $keyDown, $keyEnter)) {
         $dialogShown = Wait-Until {
-            $script:dialog = [TestNative]::FindWindow([NullString]::Value, 'Change hotkey')
+            $script:dialog = Find-ManagerWindow 'Change hotkey'
             $script:dialog -ne [IntPtr]::Zero -and (Test-Foreground $script:dialog)
         }
     }
@@ -529,20 +602,20 @@ try {
         Wait-Milliseconds 200
         Save-WindowImage $dialog "hotkey-dialog-$Theme.png"
 
-        # The default hotkey is shown with the character on the key (an umlaut on German keyboards).
-        $keyCharacter = ([string][char]([TestNative]::MapVirtualKey(0xC0, 2) -band 0xFFFF)).ToUpper()
         $current = [TestNative]::TextOf([TestNative]::FocusOf($dialog))
-        Add-Result 'Dialog shows the current hotkey with the key character' ($current -eq "Ctrl+$keyCharacter") $current
+        Add-Result 'Dialog shows the current hotkey' ($current -eq $testHotkey.Text) $current
 
-        [TestNative]::PressKeys(0x11, 0x12, 0x10, 0x78)   # Ctrl+Alt+Shift+F9
-        Wait-Milliseconds 300
+        if (Test-Foreground $dialog) {
+            [TestNative]::PressKeys(0x11, 0x12, 0x10, 0x78)   # Ctrl+Alt+Shift+F9
+            Wait-Milliseconds 300
+        }
         $shown = [TestNative]::TextOf([TestNative]::FocusOf($dialog))
         Add-Result 'Dialog shows the pressed combination' ($shown -eq 'Ctrl+Alt+Shift+F9') $shown
         if (Test-Foreground $dialog) { [TestNative]::PressKeys($keyEnter) }   # OK
         [void](Wait-Until { -not [TestNative]::IsWindowVisible($dialog) })
 
         $newTaken = -not (Test-HotkeyFree 0x7 0x78)
-        $oldFree = Test-HotkeyFree 0x2 0xC0
+        $oldFree = Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey
         Add-Result 'New hotkey registered, old one released' ($newTaken -and $oldFree) "new taken: $newTaken, old free: $oldFree"
     }
 
@@ -565,7 +638,7 @@ try {
     $switched = if ($Theme -eq 'Dark') { (& $isDark $before) -and (& $isLight $after) } else { (& $isLight $before) -and (& $isDark $after) }
     Add-Result 'Tray menu: dark mode switches the theme' $switched "brightness before $before, after $after"
 
-    # --- tray menu: Keep awake (presses Pause after $keepAwakeSeconds s without input) ---
+    # --- tray menu: Keep awake (presses F15 after $keepAwakeSeconds s without input) ---
     $keepAwakeItem = @($keyDown) * 6 + $keyEnter   # 6x Down -> Keep awake
     $idleOn = $idleOff = -1
     if ((Open-TrayMenu) -and (Send-MenuKeys $keepAwakeItem)) {
@@ -583,7 +656,8 @@ try {
 }
 finally {
     $target.Dispose()
-    $hostWindow = [TestNative]::FindWindow([NullString]::Value, 'PsClipboardManager')
+    # Only the test instance's own window - never another psclip.
+    $hostWindow = Find-ManagerWindow $instanceName
     if ($hostWindow -ne [IntPtr]::Zero) {
         [void][TestNative]::PostMessage($hostWindow, [TestNative]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
     }
@@ -591,7 +665,7 @@ finally {
     Add-Result 'Graceful shutdown via WM_CLOSE' $exited
     if (-not $exited) { Stop-Process -Id $manager.Id -Force }
 
-    if ($savedClipboard) { Set-Clipboard -Value $savedClipboard } else { [Clipboard]::Clear() }
+    Restore-Clipboard $savedClipboard
     $results | Format-Table -AutoSize -Wrap | Out-String -Width 160 | Write-Host
     Write-Host "Logs and screenshots: $OutputDirectory"
 }
