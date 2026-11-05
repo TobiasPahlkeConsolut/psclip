@@ -338,6 +338,44 @@ try {
         ($reopenedImageTextHeight -eq $imageTextHeight) "text height $reopenedImageTextHeight"
     Add-Result 'F3 hides the preview again' ($heightAfter -eq $heightBefore) "height $heightAfter"
 
+    # --- F2: edit the selected entry (the pinned one at the top) in a window of its own; Esc saves ---
+    $edit = @{ Window = [IntPtr]::Zero }
+    $editText = $editedItem = ''
+    $editBrightness = -1
+    $editClosed = $false
+    if ((Show-TestPopup) -and (Test-Foreground $popup)) {
+        [TestNative]::PressKeys(0x71)   # F2
+        $editShown = Wait-Until {
+            $edit.Window = @([TestNative]::TopLevelWindowsOf($manager.Id) | Where-Object {
+                [TestNative]::IsWindowVisible($_) -and [TestNative]::TitleOf($_) -like 'Edit entry*'
+            }) + @([IntPtr]::Zero) | Select-Object -First 1
+            $edit.Window -ne [IntPtr]::Zero -and (Test-Foreground $edit.Window)
+        }
+        if ($editShown) {
+            $editText = [TestNative]::TextOf([TestNative]::EditBox($edit.Window, $false))
+            $editBrightness = Get-WindowBrightness $edit.Window
+            Save-WindowImage $edit.Window "edit-$Theme.png"
+            # Ctrl+End, then " edited" - letters on the same keys in US and German layouts
+            foreach ($keys in @(0x11, 0x23), @(0x20), @(0x45), @(0x44), @(0x49), @(0x54), @(0x45), @(0x44)) {
+                if (-not (Test-Foreground $edit.Window)) { break }
+                [TestNative]::PressKeys([byte[]]$keys)
+            }
+            if (Test-Foreground $edit.Window) { [TestNative]::PressKeys(0x1B) }   # Esc saves and closes
+            $editClosed = Wait-Until { -not [TestNative]::IsWindowVisible($edit.Window) }
+            if ($editClosed -and (Show-TestPopup)) {
+                $editedItem = @([TestNative]::ListBoxItems($listBox))[0]
+                Hide-TestPopup
+            }
+        }
+    }
+    Add-Result 'F2 opens the entry in an edit window' ($editText -ceq "psclip test: beta line one`r`nline two") `
+        "text '$($editText -replace "`r`n", ' | ')'"
+    $themed = if ($Theme -eq 'Dark') { $editBrightness -ge 0 -and $editBrightness -lt 80 }
+        else { $editBrightness -gt 200 }
+    Add-Result 'The edit window follows the theme' $themed "brightness $editBrightness"
+    $saved = $editClosed -and $editedItem -like '*line two edited'
+    Add-Result 'Esc saves the edited text and closes the window' $saved "closed: $editClosed, list: '$editedItem'"
+
     # --- popup size: medium by default, manual resizing is reset on the next opening ---
     $mediumHeight = [int](360 * $scale)
     $openedHeight = $resizedHeight = $reopenedHeight = -1

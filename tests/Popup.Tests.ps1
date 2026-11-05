@@ -232,7 +232,7 @@ Describe 'Update-StatusText' {
     It 'shows every hint when there is room' {
         $Ui.Status.Width = 2000
         Update-StatusText
-        $Ui.Status.Text | Should Match 'F3 preview.+Shift\+Del remove$'
+        $Ui.Status.Text | Should Match 'F3 preview.+F2 edit.+Shift\+Del remove$'
     }
 
     It 'leaves out the last hints when the popup is narrow, but keeps the count' {
@@ -302,6 +302,70 @@ Describe 'Invoke-PopupKey' {
         Invoke-PopupKey (New-KeyEvent 'Shift, Delete')
         Assert-MockCalled Remove-SelectedEntry -Scope It -Exactly 1
         $plain.Handled | Should Be $false
+    }
+
+    It 'edits with F2' {
+        Mock Edit-SelectedEntry {}
+        $f2 = New-KeyEvent 'F2'
+        Invoke-PopupKey $f2
+        Assert-MockCalled Edit-SelectedEntry -Scope It -Exactly 1
+        $f2.Handled | Should Be $true
+    }
+}
+
+Describe 'Editing an entry (F2)' {
+    BeforeEach {
+        Reset-TestState
+        $script:Ui.List = [pscustomobject]@{ SelectedIndex = 0 }
+        $script:Ui.Form = [pscustomobject]@{
+            Visible = $true
+            Bounds  = [System.Drawing.Rectangle]::new(10, 20, 300, 200)
+        }
+        $Ui.Form | Add-Member -MemberType ScriptMethod -Name BeginInvoke -Value {
+            param($action)
+            $script:invoked = $action   # run by the test (.Invoke()), like the message loop would
+        }
+        $script:invoked = $null
+    }
+
+    function Select-Entry {
+        param([PsClip.ClipEntry]$Entry)
+        $State.Filtered = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
+        $State.Filtered.Add($Entry)
+    }
+
+    It 'opens the edit window for a text where the popup was, after the key press, and takes the edited text' {
+        Add-ClipboardEntry (New-FormattedEntry "line one`nline two" -Html '<b>x</b>')
+        $entry = $State.History[0]
+        Select-Entry $entry
+        Mock Show-EditDialog { "line one`r`nline two, edited" }
+        Edit-SelectedEntry
+        Assert-MockCalled Show-EditDialog -Scope It -Exactly 0
+        $script:invoked.Invoke()
+        Assert-MockCalled Show-EditDialog -Scope It -Exactly 1 -ParameterFilter {
+            $Text -ceq "line one`r`nline two" -and $Bounds.Width -eq 300
+        }
+        $entry.Text | Should BeExactly "line one`r`nline two, edited"
+        $entry.HasFormatting | Should Be $false
+    }
+
+    It 'keeps the entry as it was - formatting and line breaks - when the text was not changed' {
+        Add-ClipboardEntry (New-FormattedEntry "line one`nline two" -Html '<b>x</b>')
+        $entry = $State.History[0]
+        Select-Entry $entry
+        Mock Show-EditDialog { $Text }   # Esc right away
+        Edit-SelectedEntry
+        $script:invoked.Invoke()
+        $entry.Text | Should BeExactly "line one`nline two"
+        $entry.Html | Should BeExactly '<b>x</b>'
+    }
+
+    It 'does not open for images' {
+        Add-ClipboardEntry (New-ImageEntry)
+        Select-Entry $State.History[0]
+        Mock Show-EditDialog { 'x' }
+        Edit-SelectedEntry
+        $script:invoked | Should BeNullOrEmpty
     }
 }
 

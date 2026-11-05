@@ -415,6 +415,65 @@ Describe 'Clipboard history' {
     }
 }
 
+Describe 'Update-EntryText (F2)' {
+    BeforeEach { Reset-TestState }
+    Mock Show-TrayWarning {}
+
+    It 'replaces the text and drops the formatting, which belongs to the old text' {
+        Add-ClipboardEntry (New-FormattedEntry 'old' -Html '<b>old</b>' -Rtf '{\rtf1 old}')
+        Add-Entries 'newer'
+        $entry = Get-Entry 'old'
+        Update-EntryText $entry 'new text'
+        $entry.Text | Should BeExactly 'new text'
+        $entry.HasFormatting | Should Be $false
+        $State.History -join '|' | Should BeExactly 'newer|new text'   # keeps its place
+        $Ui.Tray.Text | Should Match ': 2 entries \('
+    }
+
+    It 'ignores blank text, the same text, images and entries removed meanwhile' {
+        Add-ClipboardEntry (New-FormattedEntry 'kept' -Html '<b>kept</b>')
+        $entry = Get-Entry 'kept'
+        Update-EntryText $entry '   '
+        Update-EntryText $entry 'kept'
+        $entry.Html | Should BeExactly '<b>kept</b>'
+        $image = New-ImageEntry
+        Add-ClipboardEntry $image
+        Update-EntryText $image 'text'
+        $null -eq $image.Text | Should Be $true
+        $removed = [PsClip.ClipEntry]::new('removed')
+        Update-EntryText $removed 'changed'
+        $removed.Text | Should BeExactly 'removed'
+    }
+
+    It 'removes another history entry that now has the same text' {
+        Add-Entries 'target', 'other'
+        Update-EntryText (Get-Entry 'other') 'target'
+        $State.History.Count | Should Be 1
+        $State.History[0].Text | Should BeExactly 'target'
+    }
+
+    It 'saves an edited pinned entry with "Keep pinned entries" on' {
+        $State.KeepPinned = $true
+        $State.PinnedFile = Join-Path $TestDrive 'pinned.dat'
+        Add-Entries 'snippet'
+        Switch-ClipboardPin (Get-Entry 'snippet')
+        Update-EntryText (Get-Entry 'snippet') 'better snippet'
+        ([PsClip.PinnedStore]::Load($State.PinnedFile, 22)) -join '|' | Should BeExactly 'better snippet'
+    }
+
+    It 'applies the memory limit to a longer text' {
+        Set-TestMemoryLimit (100 + 2 * 50 + 100 + 2 * 50)   # two entries of 50 characters
+        Add-Entries ('a' * 50), ('b' * 50)
+        Update-EntryText (Get-Entry ('b' * 50)) ('b' * 60)
+        $State.History.Count | Should Be 1
+        $State.History[0].Text | Should BeExactly ('b' * 60)
+    }
+
+    It 'shows line breaks as CR LF in the edit window' {
+        ConvertTo-EditText "a`nb`rc`r`nd" | Should BeExactly "a`r`nb`r`nc`r`nd"
+    }
+}
+
 Describe 'Saved pinned entries (-KeepPinned)' {
     BeforeEach {
         Reset-TestState

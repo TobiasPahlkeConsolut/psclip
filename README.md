@@ -23,6 +23,7 @@ The history lives in memory only and is gone when the script exits; only pinned 
   so typing a word from a screenshot finds it; typing `image` lists all images
 - **Preview** (`F3`) of the selected entry below the list: the full text or the image with its recognized text -
   select and copy any part of it; drag the top edge to make the preview bigger
+- **Edit** any text entry (`F2`), e.g. to fix a pinned snippet: a plain text window, `Esc` saves
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"; with *Keep pinned
   entries* (tray menu or `-KeepPinned`) they also survive a restart (saved encrypted for your Windows account)
 - **Dark mode** (default) or light mode, switchable from the tray menu
@@ -113,6 +114,7 @@ Press the hotkey anywhere. The popup opens at the mouse pointer, or - with *Open
 | `Enter`, double-click          | Paste the entry into the window that was active, with its formatting |
 | `Shift+Enter`                  | Paste it as plain text                           |
 | `F3`                           | Show / hide the preview: full text or image, length, time copied |
+| `F2`                           | Edit the text in a window of its own; `Esc` saves and closes it (changed text loses its formatting) |
 | `Ctrl+P`                       | Pin / unpin the entry                            |
 | `Shift+Delete`                 | Remove the entry                                 |
 | `Esc`, click elsewhere         | Close                                            |

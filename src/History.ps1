@@ -229,6 +229,38 @@ function Switch-ClipboardPin {
     Save-PinnedList
 }
 
+function ConvertTo-EditText {
+    # Line breaks as CR LF for the edit window: a text box shows a lone LF or CR as nothing.
+    param([string]$Text)
+
+    [regex]::Replace($Text, "`r`n|`r|`n", "`r`n")
+}
+
+function Update-EntryText {
+    # F2: the edited text of an entry. Changed text loses the formatting - HTML and RTF hold the old text. Blank
+    # text is not taken, nor is anything for an entry removed while it was edited.
+    param([PsClip.ClipEntry]$Entry, [string]$Text)
+
+    if ($Entry.IsImage -or [string]::IsNullOrWhiteSpace($Text) -or $Text -ceq $Entry.Text) { return }
+    $isPinned = $State.Pinned.Contains($Entry)
+    if (-not $isPinned -and -not $State.History.Contains($Entry)) { return }
+
+    $Entry.Text = $Text
+    $Entry.Html = [NullString]::Value   # $null would become '' for a .NET string
+    $Entry.Rtf = [NullString]::Value
+    # Now the same text as another entry in the history: that one goes, the edited one keeps its place.
+    for ($i = $State.History.Count - 1; $i -ge 0; $i--) {
+        $other = $State.History[$i]
+        if (-not [object]::ReferenceEquals($other, $Entry) -and $other.SameContent($Entry)) {
+            $State.History.RemoveAt($i)
+        }
+    }
+    Limit-ClipboardHistory
+    if ($isPinned) { Save-PinnedList }
+    Update-TrayText
+    Write-Verbose "Edited an entry: $($Text.Length) chars."
+}
+
 function Move-ClipboardEntryToTop {
     # After pasting an entry: like copying it again, but keeping the entry and its formatting.
     param([PsClip.ClipEntry]$Entry)

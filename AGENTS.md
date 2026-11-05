@@ -160,6 +160,13 @@ See [README.md](README.md) for features and usage.
   and WinForms re-sorts a hidden control in that collection when its window is created later, at the first show -
   so `New-PopupWindow` creates all windows up front (`Initialize-ControlHandles`). The end-to-end test drags both
   bars with the real mouse.
+- `F2` / *Edit* (`Edit-SelectedEntry`) opens a text entry in `Show-EditDialog`: a modal window with one plain
+  `TextBox`, in the theme's colors, where the popup was; no buttons - closing it (Esc, X) saves. It opens via
+  `BeginInvoke` after the key press; the popup hides when it loses the focus. `Update-EntryText` takes changed text
+  only (compared with the CR LF text shown, `ConvertTo-EditText`), drops HTML/RTF (they hold the old text), removes
+  a history entry with the same text and saves pinned entries. Set .NET string fields to `[NullString]::Value`,
+  not `$null` (which becomes `''` - `HasFormatting` would stay true). The form is disposed: no text stays in a
+  hidden window.
 - `Hide-Popup` empties the list and the preview: hidden controls can still be read by other programs
   (`LB_GETTEXT`, `WM_GETTEXT`), so no history content stays in them while the popup is closed.
 - `Update-StatusText` drops the last key hints until the line fits the popup's width.

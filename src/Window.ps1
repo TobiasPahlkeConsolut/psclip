@@ -255,6 +255,10 @@ function New-ListMenu {
         [void]$Ui.Search.Focus()
     })
 
+    $Ui.ListMenuEdit = $menu.Items.Add('Edit')
+    $Ui.ListMenuEdit.ShortcutKeyDisplayString = 'F2'
+    $Ui.ListMenuEdit.add_Click({ Edit-SelectedEntry })
+
     $remove = $menu.Items.Add('Remove')
     $remove.ShortcutKeyDisplayString = 'Shift+Del'
     $remove.add_Click({
@@ -282,11 +286,79 @@ function New-ListMenu {
         $Ui.ListMenuPlain.Text = "$verb as plain text"
         $Ui.ListMenuPlain.Visible = $entry.HasFormatting   # same as the normal paste otherwise
         $Ui.ListMenuPin.Text = if ($State.Pinned.Contains($entry)) { 'Unpin' } else { 'Pin to top' }
+        $Ui.ListMenuEdit.Visible = -not $entry.IsImage
         $Ui.ListMenuPreview.Checked = $State.PreviewVisible
     })
 
     $Ui.ListMenu = $menu
     return $menu
+}
+
+function Show-EditDialog {
+    # F2: a text in a plain text box in a window of its own, in the theme's colors. No buttons: closing the
+    # window - Esc, or its X - saves. Returns the text as it is then.
+    param([string]$Text, [Rectangle]$Bounds)
+
+    $colors = $State.Colors
+    $form = [Form]::new()
+    $form.Text = 'Edit entry - Esc saves and closes'
+    $form.StartPosition = 'Manual'
+    $form.Bounds = $Bounds
+    $form.TopMost = $true
+    $form.ShowInTaskbar = $false
+    $form.MinimizeBox = $false
+    $form.ShowIcon = $false
+    $form.SizeGripStyle = 'Hide'
+    $form.KeyPreview = $true
+    $form.AutoScaleMode = 'None'
+    $form.Font = $Ui.Font
+    $form.BackColor = $colors.Back
+    $form.Padding = [Padding]::new([int](8 * $Ui.Scale))
+
+    $box = [TextBox]::new()
+    $box.Multiline = $true
+    $box.AcceptsReturn = $true
+    $box.AcceptsTab = $true
+    $box.WordWrap = $true
+    $box.ScrollBars = 'Vertical'
+    $box.BorderStyle = 'None'
+    $box.MaxLength = $MaxEntryLength
+    $box.Dock = 'Fill'
+    $box.BackColor = $colors.Back
+    $box.ForeColor = $colors.Text
+    $box.Text = $Text
+    $form.Controls.Add($box)
+
+    # The handlers run during ShowDialog, while the variables of this function still exist.
+    $editControls = @{ Form = $form; Box = $box }
+    $form.add_KeyDown({
+        param($source, $e)
+        if ($e.KeyCode -eq [Keys]::Escape) {
+            $editControls.Form.Close()
+        }
+        elseif ($e.Control -and $e.KeyCode -eq [Keys]::A) {
+            $editControls.Box.SelectAll()   # a multiline TextBox has no Ctrl+A of its own
+        }
+        else {
+            return
+        }
+        $e.Handled = $true
+        $e.SuppressKeyPress = $true
+    })
+    $form.add_Shown({
+        [void][PsClip.Native]::ForceForeground($editControls.Form.Handle)
+        $editControls.Form.Activate()
+        [void]$editControls.Box.Focus()
+        $editControls.Box.Select(0, 0)
+        Hide-Popup   # usually hidden already: it closes when it loses the focus
+    })
+
+    [PsClip.Native]::SetDarkTitleBar($form.Handle, $State.IsDark)
+    [PsClip.Native]::SetDarkControlTheme($box.Handle, $State.IsDark)
+    [void]$form.ShowDialog()
+    $result = $box.Text
+    $form.Dispose()   # no copy of the text stays in a hidden window
+    $result
 }
 
 function New-PreviewMenu {

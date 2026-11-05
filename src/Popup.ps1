@@ -275,7 +275,7 @@ function Update-StatusText {
     }
     $parts = [List[string]]::new()
     foreach ($part in $count, "Enter $action", 'Shift+Enter plain',
-        'F3 preview', 'Ctrl+P pin', 'Shift+Del remove') {
+        'F3 preview', 'Ctrl+P pin', 'F2 edit', 'Shift+Del remove') {
         $parts.Add($part)
     }
 
@@ -361,6 +361,27 @@ function Switch-SelectedPin {
     Update-PopupList -SelectEntry $entry
 }
 
+function Edit-SelectedEntry {
+    # F2: the selected text in a window of its own (images cannot be edited). It opens once this key press or
+    # menu click has been processed; the popup closes when the edit window takes the focus.
+    $entry = Get-SelectedEntry
+    if ($null -eq $entry -or $entry.IsImage) { return }
+
+    $State.EditEntry = $entry
+    [void]$Ui.Form.BeginInvoke([Action] { Edit-ClipboardEntry })
+}
+
+function Edit-ClipboardEntry {
+    # The edit window for $State.EditEntry, where the popup was; closing it saves.
+    $entry = $State.EditEntry
+    $State.EditEntry = $null
+    if ($null -eq $entry) { return }
+
+    $shown = ConvertTo-EditText $entry.Text
+    $edited = Show-EditDialog -Text $shown -Bounds $Ui.Form.Bounds
+    if ($edited -cne $shown) { Update-EntryText $entry $edited }   # unchanged: keeps its formatting
+}
+
 function Remove-SelectedEntry {
     $entry = Get-SelectedEntry
     if ($null -eq $entry) { return }
@@ -386,6 +407,7 @@ function Invoke-PopupKey {
         ([Keys]::Up) { Move-Selection -1 }
         ([Keys]::PageDown) { Move-Selection $page }
         ([Keys]::PageUp) { Move-Selection (-$page) }
+        ([Keys]::F2) { Edit-SelectedEntry }
         ([Keys]::F3) { Switch-Preview }
         ([Keys]::P) {
             if ($KeyEvent.Control) { Switch-SelectedPin } else { $handled = $false }

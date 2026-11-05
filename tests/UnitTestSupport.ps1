@@ -74,6 +74,7 @@ function Reset-TestState {
         PreviewVisible      = $false
         PreviewTextShare    = 0.3
         PreviewEntry        = $null
+        EditEntry           = $null
         KeepAwake           = $false
         OcrQueue            = [System.Collections.Generic.Queue[PsClip.ClipEntry]]::new()
         OcrJob              = $null

@@ -16,6 +16,8 @@
         Up/Down, PgUp/PgDn    move the selection
         Enter, double-click   paste the entry into the window that was active, with formatting
         Shift+Enter           paste it as plain text
+        F2                    edit the text of the entry in a window of its own; Esc saves and
+                              closes it (changed text loses its formatting)
         F3                    show / hide the preview of the selected entry (full text or image)
         Ctrl+P                pin / unpin the entry; pinned entries stay on top and are never
                               dropped by MaxMemory or "Clear history"
@@ -294,6 +296,7 @@ $State = @{
     PreviewDefault       = $Preview.IsPresent    # how the popup opens
     PreviewTextShare     = $PreviewTextShare     # text below an image; the bar between them changes it
     PreviewEntry         = $null                 # the entry the preview shows
+    EditEntry            = $null                 # F2: the entry the edit window opens for
     KeepAwake            = $false                # the tray menu switches it
     OcrQueue             = [Queue[PsClip.ClipEntry]]::new()   # images waiting for text recognition
     OcrJob               = $null                 # the recognition in progress
