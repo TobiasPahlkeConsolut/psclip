@@ -1,4 +1,4 @@
-# Pinned entries saved by -KeepPinned (pinned.dat, pinned-<InstanceName>.dat and the temporary file while
-# writing) - personal data, even though encrypted: never commit them.
+# Pinned entries saved by "Keep pinned entries" (pinned.dat, pinned-<InstanceName>.dat, the temporary file while
+# writing and files set aside as unreadable) - personal data, even though encrypted: never commit them.
 /pinned*.dat
-/pinned*.dat.tmp
+/pinned*.dat.*

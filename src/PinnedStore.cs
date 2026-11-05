@@ -34,9 +34,15 @@ namespace PsClip
             }
             byte[] data = ProtectedData.Protect(Serialize(entries), Entropy, DataProtectionScope.CurrentUser);
             // Written next to the file first, then swapped in: a crash or power cut while writing leaves the
-            // previous version, never half a file.
+            // previous version, never half a file. Flushed to the disk before the swap - otherwise the swap
+            // could be on the disk after a power cut while the new content is not.
             string temp = path + ".tmp";
-            File.WriteAllBytes(temp, data);
+            using (FileStream stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None, 4096,
+                FileOptions.WriteThrough))
+            {
+                stream.Write(data, 0, data.Length);
+                stream.Flush(true);
+            }
             if (File.Exists(path))
             {
                 File.Replace(temp, path, null);
@@ -47,13 +53,38 @@ namespace PsClip
             }
         }
 
-        // The saved entries, or none when there is no file. Throws when the file cannot be read or
-        // decrypted (another user's file, a password reset by an administrator, a damaged file).
+        // The saved entries, or none when there is no file. Throws
+        // - an IOException or UnauthorizedAccessException when the file cannot be opened - maybe only for the
+        //   moment, e.g. while a backup program or virus scanner reads it;
+        // - an InvalidDataException (with a short message for the user) when it can be opened but not read:
+        //   another Windows account's or computer's file (the key does not fit), a password reset by an
+        //   administrator, damage, a newer format.
         public static List<ClipEntry> Load(string path, int thumbnailHeight)
         {
             if (!File.Exists(path)) return new List<ClipEntry>();
-            byte[] data = ProtectedData.Unprotect(File.ReadAllBytes(path), Entropy, DataProtectionScope.CurrentUser);
-            return Deserialize(data, thumbnailHeight);
+            byte[] data = File.ReadAllBytes(path);
+            byte[] plain;
+            try
+            {
+                plain = ProtectedData.Unprotect(data, Entropy, DataProtectionScope.CurrentUser);
+            }
+            catch (CryptographicException e)
+            {
+                throw new InvalidDataException("It belongs to another Windows account or computer, or is damaged.", e);
+            }
+            try
+            {
+                return Deserialize(plain, thumbnailHeight);
+            }
+            catch (InvalidDataException)
+            {
+                throw;
+            }
+            catch (Exception e)
+            {
+                // E.g. an EndOfStreamException - an IOException, but nothing that goes away by itself.
+                throw new InvalidDataException("The file is damaged.", e);
+            }
         }
 
         public static byte[] Serialize(IList<ClipEntry> entries)

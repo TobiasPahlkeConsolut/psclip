@@ -78,10 +78,10 @@ $errorLog = Join-Path $OutputDirectory 'manager.err.log'
 $savedClipboard = Save-Clipboard
 
 Set-Clipboard -Value 'psclip test: initial entry'
-$manager = Start-Process powershell.exe -NoNewWindow -PassThru `
-    -RedirectStandardOutput $log -RedirectStandardError $errorLog `
-    -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"", '-Theme', $Theme,
+$managerArguments = '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"", '-Theme', $Theme,
     '-KeepAwakeSeconds', $keepAwakeSeconds, '-InstanceName', $instanceName, '-Hotkey', $testHotkey.Text, '-Verbose'
+$manager = Start-Process powershell.exe -NoNewWindow -PassThru `
+    -RedirectStandardOutput $log -RedirectStandardError $errorLog -ArgumentList $managerArguments
 
 # The window the popup pastes into - a rich text box, to see whether formatting arrives
 $target = [Form]::new()
@@ -518,6 +518,24 @@ try {
     Add-Result 'Tray menu: keep awake prevents idle time' ($idleOn -ge 0 -and $idleOn -lt $limit + 1800) `
         "longest idle $idleOn ms, limit $limit ms"
     Add-Result 'Keep awake can be switched off again' ($idleOff -gt $limit + 2500) "longest idle $idleOff ms"
+
+    # --- Keep pinned entries across a restart: switch on, exit, start again with -KeepPinned ---
+    $restartLog = Join-Path $OutputDirectory 'manager-restart.log'
+    $restored = $false
+    $switchedOn = (Open-TrayMenu) -and (Send-MenuKeys $keepPinnedItem)
+    if ($switchedOn -and (Wait-Until { Test-Path -LiteralPath $pinnedFile })) {
+        $hostWindow = Find-ManagerWindow $instanceName
+        [void][TestNative]::PostMessage($hostWindow, [TestNative]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
+        if ($manager.WaitForExit(5000)) {
+            $manager = Start-Process powershell.exe -NoNewWindow -PassThru -RedirectStandardOutput $restartLog `
+                -RedirectStandardError "$errorLog.restart" -ArgumentList ($managerArguments + '-KeepPinned')
+            $restored = Wait-Until {
+                (Test-Path $restartLog) -and ((Get-Content $restartLog -Raw) -cmatch 'Running \(PID')
+            } 15000
+            $restored = $restored -and ((Get-Content $restartLog -Raw) -match 'Restored [1-9]\d* pinned entries')
+        }
+    }
+    Add-Result 'Pinned entries come back after a restart (-KeepPinned)' $restored $restartLog
 }
 finally {
     $target.Dispose()

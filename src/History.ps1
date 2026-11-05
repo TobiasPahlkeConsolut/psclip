@@ -141,8 +141,10 @@ function Add-ClipboardEntry {
     $pinnedIndex = Find-ClipboardEntry $State.Pinned $Entry
     if ($pinnedIndex -ge 0) {
         if (-not $Entry.IsImage) {
+            $previous = $State.Pinned[$pinnedIndex]
             $State.Pinned[$pinnedIndex] = $Entry
-            Save-PinnedList   # the newer formatting
+            # Only for new formatting: saving rewrites all pinned entries (images too) on this thread.
+            if ($Entry.Html -cne $previous.Html -or $Entry.Rtf -cne $previous.Rtf) { Save-PinnedList }
         }
         return
     }
@@ -165,6 +167,16 @@ function Add-ClipboardEntry {
         "$($Entry.Text.Length) chars"
     }
     Write-Verbose "Recorded entry ($what); $($State.History.Count) entries in history."
+}
+
+function Add-InitialClipboardEntry {
+    # At startup, the clipboard content becomes the first entry - but it is not a new copy: it must not
+    # replace a pinned entry. The clipboard may still hold a plain-text paste of it from the last run, which
+    # would strip its formatting (and save that).
+    param([PsClip.ClipEntry]$Entry)
+
+    if ($null -eq $Entry -or (Find-ClipboardEntry $State.Pinned $Entry) -ge 0) { return }
+    Add-ClipboardEntry $Entry
 }
 
 function Find-ClipboardEntry {
@@ -297,30 +309,43 @@ function Get-PinnedFilePath {
 }
 
 function Restore-PinnedList {
-    # At startup with -KeepPinned: the pinned entries the last run saved. Returns a message for the
-    # user when the file cannot be read.
-    if (-not $State.KeepPinned) { return }
+    # At startup: with "Keep pinned entries" on (-KeepPinned), the pinned entries the last run saved.
+    # Returns a message for the user when the file cannot be read - or exists but is not loaded.
+    if (-not $State.PinnedFile) { return }
+    $fileName = Split-Path -Leaf $State.PinnedFile
+    if (-not $State.KeepPinned) {
+        if (Test-Path -LiteralPath $State.PinnedFile) {
+            return "$fileName holds saved pinned entries, but 'Keep pinned entries' is off: switch it on in the " +
+                'tray menu to load them.'
+        }
+        return
+    }
 
     $problem = Import-PinnedList
-    if ($problem) {
-        # Saving would replace the file with the entries pinned from now on - but it may be readable
-        # again later (e.g. locked only for the moment). So it is switched off, and the user decides.
-        $State.KeepPinned = $false
-        return "Could not read the saved pinned entries ($(Split-Path -Leaf $State.PinnedFile)): $problem " +
-            "'Keep pinned entries' is off - switching it on in the tray menu replaces the file."
+    if ($null -eq $problem) { return }
+    # Saving would overwrite the file, so it is switched off - and the user decides (Set-KeepPinned).
+    $State.KeepPinned = $false
+    if ($problem -is [System.IO.InvalidDataException]) {
+        return "$fileName cannot be read: $($problem.Message) 'Keep pinned entries' is off."
     }
+    "$fileName cannot be opened - it may be in use. 'Keep pinned entries' is off; switch it on to try again."
 }
 
 function Import-PinnedList {
     # Adds the saved pinned entries (PsClip.PinnedStore) after the pinned ones, except those already
-    # pinned; an entry also in the history moves out of it. Returns the problem if the file cannot be read.
+    # pinned; an entry also in the history moves out of it. Returns the exception if the file cannot be read
+    # (see PinnedStore.Load: InvalidDataException = unreadable, others = cannot be opened).
     try {
         $entries = [PsClip.PinnedStore]::Load($State.PinnedFile, $Ui.ThumbnailHeight)
     }
     catch {
-        $message = $_.Exception.GetBaseException().Message.Trim()
+        $problem = $_.Exception
+        if ($problem -is [System.Management.Automation.MethodInvocationException] -and $problem.InnerException) {
+            $problem = $problem.InnerException   # the exception PinnedStore threw
+        }
+        $message = $problem.GetBaseException().Message
         Write-Verbose "Could not read the pinned entries from $($State.PinnedFile): $message"
-        return $message
+        return $problem
     }
     $added = 0
     foreach ($entry in $entries) {
@@ -337,22 +362,43 @@ function Import-PinnedList {
 function Set-KeepPinned {
     # Tray menu "Keep pinned entries". On: adds the saved entries (a file from an earlier run) and saves
     # all pinned entries. Off: deletes the file - the pinned entries stay until exit, so switching it on
-    # again saves them again.
+    # again saves them again. A file that could not be read is never overwritten or deleted.
     param([bool]$Enabled)
 
-    $State.KeepPinned = $Enabled
+    $fileName = Split-Path -Leaf $State.PinnedFile
     if ($Enabled) {
-        $State.PinnedSaveFailed = $false
         $problem = Import-PinnedList
+        if ($null -ne $problem -and $problem -isnot [System.IO.InvalidDataException]) {
+            # Maybe only for the moment (a backup program, a virus scanner): stays off, the file stays as it is.
+            Show-TrayWarning ("$fileName cannot be opened - it may be in use. 'Keep pinned entries' stays off; " +
+                'try again later.')
+            return
+        }
+        $setAside = $null
+        if ($null -ne $problem) {
+            # Kept under another name: it may still be readable by the right Windows account or computer.
+            $setAside = "$($State.PinnedFile).unreadable-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+            try {
+                [System.IO.File]::Move($State.PinnedFile, $setAside)
+            }
+            catch {
+                Show-TrayWarning "$fileName cannot be read, nor renamed. 'Keep pinned entries' stays off."
+                return
+            }
+        }
+        $State.KeepPinned = $true
+        $State.PinnedSaveFailed = $false
         Limit-ClipboardHistory
         Save-PinnedList
-        if ($problem -and -not $State.PinnedSaveFailed) {
-            Show-TrayWarning "The saved pinned entries could not be read ($problem) and were replaced."
+        if ($setAside) {
+            Show-TrayWarning ("$fileName could not be read: $($problem.Message) It was renamed to " +
+                "$(Split-Path -Leaf $setAside); the pinned entries are saved to a new $fileName.")
         }
         Update-TrayText
         if ($Ui.Form.Visible) { Update-PopupList }
     }
     else {
+        $State.KeepPinned = $false
         try {
             [System.IO.File]::Delete($State.PinnedFile)   # no error when there is no file
             [System.IO.File]::Delete("$($State.PinnedFile).tmp")
@@ -361,7 +407,7 @@ function Set-KeepPinned {
             Show-TrayWarning "Could not delete the saved pinned entries: $($_.Exception.GetBaseException().Message)"
         }
     }
-    Write-Verbose "Keep pinned entries $(if ($Enabled) { 'on' } else { 'off' })."
+    Write-Verbose "Keep pinned entries $(if ($State.KeepPinned) { 'on' } else { 'off' })."
 }
 
 function Save-PinnedList {

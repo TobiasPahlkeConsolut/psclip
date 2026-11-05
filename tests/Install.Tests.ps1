@@ -115,6 +115,16 @@ Describe 'Get-ShortcutArguments' {
     }
 }
 
+Describe 'Get-UnloadedPinnedWarning' {
+    It 'warns when saved pinned entries would not be loaded without -KeepPinned' {
+        [System.IO.File]::WriteAllBytes((Join-Path $TestDrive 'pinned.dat'), [byte[]](1, 2, 3))
+        Get-UnloadedPinnedWarning $TestDrive $false | Should Match '^pinned\.dat holds saved pinned entries'
+        Get-UnloadedPinnedWarning $TestDrive $true | Should BeNullOrEmpty
+        Remove-Item -LiteralPath (Join-Path $TestDrive 'pinned.dat')
+        Get-UnloadedPinnedWarning $TestDrive $false | Should BeNullOrEmpty
+    }
+}
+
 Describe 'Assert-Hotkey' {
     It 'accepts a valid hotkey' {
         { Assert-Hotkey 'Ctrl+Alt+V' } | Should Not Throw

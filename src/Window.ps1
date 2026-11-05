@@ -359,7 +359,8 @@ function New-TrayIcon {
     [void]$menu.Items.Add($Ui.MemoryMenuItem)
 
     $Ui.KeepPinnedMenuItem = $menu.Items.Add('Keep pinned entries')
-    $Ui.KeepPinnedMenuItem.ToolTipText = 'Saves them encrypted (pinned.dat) for the next start; off deletes the file'
+    $Ui.KeepPinnedMenuItem.ToolTipText = 'Saves the pinned entries encrypted to pinned.dat; loaded at start with ' +
+        '-KeepPinned. Off deletes the file'
     $Ui.KeepPinnedMenuItem.add_Click({ Set-KeepPinned (-not $State.KeepPinned) })
     [void]$menu.Items.Add([ToolStripSeparator]::new())
 
@@ -416,6 +417,8 @@ function Show-TrayWarning {
     # A message at the tray icon - psclip has no window of its own to show problems in.
     param([string]$Text)
 
+    # Windows cuts the text after 255 characters - without a sign that something is missing
+    if ($Text.Length -gt 255) { $Text = $Text.Substring(0, 254) + [char]0x2026 }
     $Ui.Tray.ShowBalloonTip(8000, 'Clipboard history', $Text, 'Warning')
 }
 

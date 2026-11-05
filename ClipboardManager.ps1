@@ -84,8 +84,9 @@
     Start with "Keep pinned entries" switched on (it can be switched in the tray menu): the pinned
     entries are saved to the file pinned.dat next to this script whenever they change, and loaded
     at the next start. The file is encrypted for your Windows account (DPAPI), so other users
-    cannot read it, nor can anyone on another computer. The rest of the history is never saved.
-    Switching it off in the tray menu deletes the file.
+    cannot read it, nor can anyone else on another computer. The rest of the history is never
+    saved. Switching it off in the tray menu deletes the file; a file that cannot be read is never
+    overwritten (switching on renames it to pinned.dat.unreadable-<date>).
 
 .PARAMETER InstanceName
     Name of the instance's mutex and hidden window. Only needed to run a second, independent
@@ -307,18 +308,19 @@ try {
     Start-ClipboardListener
     Initialize-KeepAwake
     Initialize-Ocr
-    # After Initialize-Ocr (queues images whose text is not recognized yet), before the clipboard is
-    # read: a copied text equal to a pinned entry must find it.
-    $warnings = @(Restore-PinnedList)
 
+    # Shown together in one tray message (at most 255 characters): the important one first.
+    $warnings = @()
     $hotkeyOk = Register-Hotkey $hotkeySpec
     if (-not $hotkeyOk) {
-        $warnings += "The hotkey $($State.HotkeyText) is already used by another program. " +
-            "Right-click the tray icon and choose 'Change hotkey'."
+        $warnings += "The hotkey $($State.HotkeyText) is used by another program: choose another one with " +
+            "'Change hotkey' in the tray menu."
     }
+    # After Initialize-Ocr (queues images whose text is not recognized yet), before the clipboard is
+    # read: a copied text equal to a pinned entry must find it.
+    $warnings += @(Restore-PinnedList)
     try {
-        $initial = Read-ClipboardEntry
-        if ($null -ne $initial) { Add-ClipboardEntry $initial }
+        Add-InitialClipboardEntry (Read-ClipboardEntry)
     }
     catch {
         Write-Verbose "Could not read the initial clipboard content: $($_.Exception.Message)"

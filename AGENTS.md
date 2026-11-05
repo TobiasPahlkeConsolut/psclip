@@ -91,19 +91,25 @@ See [README.md](README.md) for features and usage.
   whether the current WinRT task (converted with `AsTask`) is done. Never `.Wait()` on these tasks on the UI thread.
   `OcrText`: null = not yet recognized, `''` = no text. Without an OCR language `$Ui` has no `OcrEngine`.
 - "Keep pinned entries" (tray menu, `Set-KeepPinned`; `-KeepPinned` starts with it on; `$State.KeepPinned`):
-  `Save-PinnedList` writes all pinned entries after every change (pin, unpin, remove, a re-copied pinned text) - not
-  at exit, which a crash or a killed process skips - and `Restore-PinnedList` loads them at startup, after
-  `Initialize-Ocr` and before the clipboard is first read. Switching it on merges the saved entries into the pinned
-  ones (`Import-PinnedList`: no duplicates, out of the history) and saves; switching it off deletes the file, the
-  entries stay in memory. The file (`$State.PinnedFile`) is `pinned.dat` next to the script
+  `Save-PinnedList` writes all pinned entries after every change (pin, unpin, remove, a re-copied pinned text with
+  new formatting) - not at exit, which a crash or a killed process skips - and `Restore-PinnedList` loads them at
+  startup, after `Initialize-Ocr` and before the clipboard is first read. That first read
+  (`Add-InitialClipboardEntry`) must not replace a pinned entry: the clipboard may hold a plain-text paste of it
+  from the last run (`OwnClipboardSequence` does not survive a restart). Switching it on merges the saved entries
+  into the pinned ones (`Import-PinnedList`: no duplicates, out of the history) and saves; switching it off deletes
+  the file, the entries stay in memory. The file (`$State.PinnedFile`) is `pinned.dat` next to the script
   (`pinned-<InstanceName>.dat` for other instances, e.g. the end-to-end test's), ignored by git.
   `PsClip.PinnedStore` writes its own binary format - never use a general-purpose deserializer (BinaryFormatter,
   CliXml) for it - encrypted with DPAPI (CurrentUser scope plus entropy; hence `System.Security` in `Add-Type`), via
-  a temporary file and `File.Replace`. Strings are stored as raw UTF-16 so that every text comes back exactly
-  (`SameContent`), images keep their PNG bytes (`ClipEntry.FromPng`) and their recognized text; images saved before
-  it was recognized are queued again. A file that cannot be read at startup is left alone: the setting is switched
-  off and the user gets a tray message; switching it on replaces the file. If the format ever changes, keep reading
-  the old `FormatVersion` - otherwise users lose their pinned entries.
+  a temporary file (flushed to the disk) and `File.Replace`. Strings are stored as raw UTF-16 so that every text
+  comes back exactly (`SameContent`), images keep their PNG bytes (`ClipEntry.FromPng`) and their recognized text;
+  images saved before it was recognized are queued again. **A file that could not be read is never overwritten or
+  deleted**: `PinnedStore.Load` throws an `InvalidDataException` (short message for the user) when it cannot be
+  decrypted or parsed, and lets an `IOException` through when it cannot be opened (maybe only for the moment). At
+  startup either switches the setting off with a tray message; switching it on then renames an unreadable file to
+  `pinned.dat.unreadable-<date>`, and stays off for one that cannot be opened. Tray messages are cut at 255
+  characters (`Show-TrayWarning`), so keep them short and put no paths in them. If the format ever changes, keep
+  reading the old `FormatVersion` - otherwise users lose their pinned entries.
 - `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
   `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,

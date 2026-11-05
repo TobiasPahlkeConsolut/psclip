@@ -170,17 +170,21 @@ start, use `-KeepPinned` (e.g. `.\Install.ps1 -KeepPinned`).
 - The pinned entries are saved to **`pinned.dat` next to `ClipboardManager.ps1`** - texts with their formatting,
   images as PNG - every time they change (pin, unpin, remove, copying a pinned text again), and loaded at the next
   start. Not only at exit: a crash, a killed process or a power cut would skip that. Writing goes to a temporary file
-  first, so the old version stays intact if writing is interrupted. Nothing else of the history is ever saved.
+  first, flushed to the disk, and then replaces the old version - an interrupted write leaves the old one intact.
+  Nothing else of the history is ever saved.
 - **Switching it on** saves the current pinned entries right away; entries an earlier run saved are added to them.
   **Switching it off** deletes `pinned.dat` right away. The pinned entries stay until psclip exits, so switching it on
-  again saves them again.
+  again saves them again. If psclip starts with it off while a `pinned.dat` exists, it says so.
 - The file is **encrypted for your Windows account** (DPAPI, the protection Windows' Credential Manager and browsers use
   for saved passwords): the key comes from your Windows sign-in, so other users of the PC cannot read it, and neither
-  can anyone who copies the file to another computer. Programs running under your own account could decrypt it -
-  like they could read psclip's memory.
-- If the file cannot be read - e.g. after an administrator reset the password of a local Windows account, which
-  makes the key unusable - psclip says so at startup and switches *Keep pinned entries* off, leaving the file alone.
-  Switching it on again replaces the file.
+  can anyone else who copies the file to another computer. Programs running under your own account could decrypt
+  it - like they could read psclip's memory.
+- **A file psclip cannot read is never overwritten or deleted.** If it cannot be decrypted (another Windows account's
+  or computer's file, a password an administrator reset, damage), psclip says so at startup and switches *Keep
+  pinned entries* off; switching it on renames the file to `pinned.dat.unreadable-<date>` and starts a new one. If
+  the file is only in use (e.g. by a backup program), the setting stays off until switching it on succeeds.
+- The key belongs to one Windows account on one computer: if several users share the psclip folder, or it is synced
+  to other computers (e.g. OneDrive), each of them can only read their own `pinned.dat` - use a folder of your own.
 - Git ignores `pinned.dat` (`.gitignore`), so it never ends up in a commit.
 
 ## Options

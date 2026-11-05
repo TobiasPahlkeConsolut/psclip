@@ -537,10 +537,11 @@ Describe 'Saved pinned entries (-KeepPinned)' {
             Should BeGreaterThan 0
     }
 
-    It 'keeps a file it cannot read and switches off - until the user switches it on, which replaces it' {
+    It 'keeps a file it cannot read and switches off; switching on sets the file aside, never overwrites it' {
         [System.IO.File]::WriteAllBytes($State.PinnedFile, [byte[]](1..100))
-        Restart-WithSavedPins |
-            Should Match "Could not read the saved pinned entries \(pinned\.dat\): .+ 'Keep pinned entries' is off"
+        $message = Restart-WithSavedPins
+        $message | Should BeExactly ("pinned.dat cannot be read: It belongs to another Windows account or computer, " +
+            "or is damaged. 'Keep pinned entries' is off.")
         $State.KeepPinned | Should Be $false
         $State.Pinned.Count | Should Be 0
         Add-Entries 'a'
@@ -548,8 +549,81 @@ Describe 'Saved pinned entries (-KeepPinned)' {
         [System.IO.File]::ReadAllBytes($State.PinnedFile) -join ',' | Should BeExactly ((1..100) -join ',')
 
         Set-KeepPinned $true
+        $State.KeepPinned | Should Be $true
         (Read-SavedPins) -join '|' | Should BeExactly 'a'
-        Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It -ParameterFilter { $Text -like '*replaced*' }
+        $setAside = @(Get-ChildItem -LiteralPath $TestDrive -Filter 'pinned.dat.unreadable-*')
+        $setAside.Count | Should Be 1
+        [System.IO.File]::ReadAllBytes($setAside[0].FullName) -join ',' | Should BeExactly ((1..100) -join ',')
+        Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It -ParameterFilter {
+            $Text -like "*renamed to $($setAside[0].Name)*"
+        }
+        Remove-Item -LiteralPath $setAside[0].FullName
+    }
+
+    It 'sets aside even when nothing is pinned, instead of deleting the file' {
+        [System.IO.File]::WriteAllBytes($State.PinnedFile, [byte[]](1..100))
+        $State.KeepPinned = $false
+        Set-KeepPinned $true
+        $setAside = @(Get-ChildItem -LiteralPath $TestDrive -Filter 'pinned.dat.unreadable-*')
+        $setAside.Count | Should Be 1
+        Remove-Item -LiteralPath $setAside[0].FullName
+    }
+
+    It 'leaves a file that is only in use alone: off at startup, stays off when switched on, loads it later' {
+        Add-Entries 'saved'
+        Switch-ClipboardPin (Get-Entry 'saved')
+        $lock = [System.IO.File]::Open($State.PinnedFile, 'Open', 'ReadWrite', 'None')   # like a backup program
+        try {
+            Restart-WithSavedPins | Should Match "^pinned\.dat cannot be opened - it may be in use\. .+ try again\.$"
+            $State.KeepPinned | Should Be $false
+            Add-Entries 'new'
+            Switch-ClipboardPin (Get-Entry 'new')
+            Set-KeepPinned $true
+            $State.KeepPinned | Should Be $false
+            Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It -ParameterFilter {
+                $Text -like '*stays off*'
+            }
+        }
+        finally {
+            $lock.Dispose()
+        }
+        (Read-SavedPins) -join '|' | Should BeExactly 'saved'   # untouched
+        Set-KeepPinned $true
+        $State.Pinned -join '|' | Should BeExactly 'new|saved'
+        (Read-SavedPins) -join '|' | Should BeExactly 'new|saved'
+    }
+
+    It 'tells at startup about saved entries that are not loaded because it is off' {
+        Add-Entries 'saved'
+        Switch-ClipboardPin (Get-Entry 'saved')
+        $file = $State.PinnedFile
+        Reset-TestState
+        $State.PinnedFile = $file
+        Restore-PinnedList | Should Match "^pinned\.dat holds saved pinned entries, but 'Keep pinned entries' is off"
+        $State.Pinned.Count | Should Be 0
+    }
+
+    It 'does not let the clipboard at startup replace a pinned entry - it may be a plain paste of it' {
+        Add-PinnedEntry (New-FormattedEntry 'snippet' -Html '<b>snippet</b>')
+        Restart-WithSavedPins
+        Add-InitialClipboardEntry ([PsClip.ClipEntry]::new('snippet'))
+        $State.Pinned[0].Html | Should BeExactly '<b>snippet</b>'
+        (Read-SavedPins)[0].Html | Should BeExactly '<b>snippet</b>'
+        $State.History.Count | Should Be 0
+        Add-InitialClipboardEntry ([PsClip.ClipEntry]::new('other'))
+        $State.History -join '|' | Should BeExactly 'other'
+        Add-InitialClipboardEntry $null
+    }
+
+    It 'rewrites the file for a re-copied pinned text only when its formatting changed' {
+        Add-PinnedEntry (New-FormattedEntry 'snippet' -Html '<b>snippet</b>')
+        $old = [datetime]'2020-01-01'
+        [System.IO.File]::SetLastWriteTimeUtc($State.PinnedFile, $old)
+        Add-ClipboardEntry (New-FormattedEntry 'snippet' -Html '<b>snippet</b>')
+        [System.IO.File]::GetLastWriteTimeUtc($State.PinnedFile) | Should Be $old
+        Add-ClipboardEntry (New-FormattedEntry 'snippet' -Html '<i>snippet</i>')
+        [System.IO.File]::GetLastWriteTimeUtc($State.PinnedFile) | Should Not Be $old
+        (Read-SavedPins)[0].Html | Should BeExactly '<i>snippet</i>'
     }
 
     It 'switched on in the tray menu, saves the pinned entries right away' {

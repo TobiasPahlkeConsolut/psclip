@@ -242,6 +242,16 @@ function New-Shortcut {
     }
 }
 
+function Get-UnloadedPinnedWarning {
+    # Saved pinned entries that psclip started by the new shortcuts would not load (no -KeepPinned).
+    param([string]$Folder, [bool]$KeepPinned)
+
+    $file = Join-Path $Folder 'pinned.dat'
+    if ($KeepPinned -or -not (Test-Path -LiteralPath $file)) { return }
+    'pinned.dat holds saved pinned entries, but without -KeepPinned psclip does not load them at start ' +
+        "(only when 'Keep pinned entries' is switched on in its tray menu). Add -KeepPinned to keep them."
+}
+
 function Confirm-Restart {
     param([string]$Question)
 
@@ -268,9 +278,9 @@ if ($Uninstall) {
             Write-Host "Removed $path"
         }
     }
-    $pinnedFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'pinned*.dat' -File)
+    $pinnedFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'pinned*.dat*' -File)
     if ($pinnedFiles.Count -gt 0) {
-        Write-Host ('Pinned entries saved by -KeepPinned are still in this folder (' +
+        Write-Host ('Pinned entries saved by "Keep pinned entries" are still in this folder (' +
             (($pinnedFiles | ForEach-Object { $_.Name }) -join ', ') + '); they go with it when you delete it.')
     }
     return
@@ -304,10 +314,13 @@ elseif (Test-Path -LiteralPath $autostartShortcut) {
     Write-Host 'Removed the autostart shortcut (use -Autostart to keep it).'
 }
 
+$pinnedWarning = Get-UnloadedPinnedWarning $PSScriptRoot $KeepPinned.IsPresent
+if ($pinnedWarning) { Write-Warning $pinnedWarning }
+
 $runningId = Get-ManagerProcessId
 if ($runningId -ne 0) {
-    $question = 'psclip is running. Restart it now so that the new settings apply? ' +
-        'Its history will be lost, and its pinned entries too unless it runs with -KeepPinned.'
+    $question = 'psclip is running. Restart it now so that the new settings apply? Its history will be ' +
+        "lost - and its pinned entries too, unless 'Keep pinned entries' is on in its tray menu."
     if (-not ($Force -or (Confirm-Restart $question))) {
         Write-Host 'psclip keeps running with its current settings; the new ones apply the next time it starts.'
         return

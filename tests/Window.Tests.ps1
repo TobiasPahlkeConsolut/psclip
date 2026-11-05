@@ -38,3 +38,19 @@ Describe 'Update-TrayText' {
         $Ui.Tray.Text | Should BeExactly 'Clipboard history: 2 entries (Ctrl+Shift+V)'
     }
 }
+
+Describe 'Show-TrayWarning' {
+    It 'shortens a text over the 255 characters Windows shows, visibly' {
+        Reset-TestState
+        $shown = [System.Collections.Generic.List[string]]::new()
+        $Ui.Tray | Add-Member -MemberType ScriptMethod -Name ShowBalloonTip -Value {
+            param($timeout, $title, $text, $icon)
+            $shown.Add($text)
+        }
+        Show-TrayWarning ('x' * 300)
+        Show-TrayWarning 'short'
+        $shown[0].Length | Should Be 255
+        $shown[0].EndsWith([string][char]0x2026) | Should Be $true
+        $shown[1] | Should BeExactly 'short'
+    }
+}
