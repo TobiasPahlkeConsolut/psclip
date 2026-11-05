@@ -88,6 +88,36 @@ public static class TestNative
         return pid;
     }
 
+    [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr hwnd, ref Point point);
+
+    // Screen rectangle of the caret (text cursor) in the thread of the window; all zero without one.
+    public static Rect CaretOf(IntPtr hwnd)
+    {
+        uint pid;
+        GuiThreadInfo info = new GuiThreadInfo();
+        info.Size = Marshal.SizeOf(typeof(GuiThreadInfo));
+        Rect rect = new Rect();
+        if (!GetGUIThreadInfo(GetWindowThreadProcessId(hwnd, out pid), ref info)) return rect;
+        if (info.Caret == IntPtr.Zero) return rect;
+        Point topLeft = new Point();
+        topLeft.X = info.CaretRect.Left;
+        topLeft.Y = info.CaretRect.Top;
+        ClientToScreen(info.Caret, ref topLeft);
+        rect.Left = topLeft.X;
+        rect.Top = topLeft.Y;
+        rect.Right = topLeft.X + info.CaretRect.Right - info.CaretRect.Left;
+        rect.Bottom = topLeft.Y + info.CaretRect.Bottom - info.CaretRect.Top;
+        return rect;
+    }
+
+    // The window rectangle as Windows positions it (Form.Location), invisible resize borders included
+    public static Rect WindowRectOf(IntPtr hwnd)
+    {
+        Rect rect;
+        GetWindowRect(hwnd, out rect);
+        return rect;
+    }
+
     // Visible frame of the window, without the invisible resize borders (DWMWA_EXTENDED_FRAME_BOUNDS)
     public static Rect RectOf(IntPtr hwnd)
     {

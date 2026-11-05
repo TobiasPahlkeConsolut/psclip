@@ -95,6 +95,35 @@ Describe 'Update-PopupList' {
     }
 }
 
+Describe 'Get-PopupLocation' {
+    $area = [System.Drawing.Rectangle]::new(0, 0, 1920, 1040)
+    $size = [System.Drawing.Size]::new(560, 400)
+    $pointer = [System.Drawing.Point]::new(100, 200)
+
+    It 'opens at the mouse pointer without a text cursor' {
+        Get-PopupLocation $size $pointer ([System.Drawing.Rectangle]::Empty) $area |
+            Should Be ([System.Drawing.Point]::new(100, 200))
+    }
+
+    It 'opens just below the text cursor' {
+        $caret = [System.Drawing.Rectangle]::new(700, 300, 2, 20)
+        Get-PopupLocation $size $pointer $caret $area | Should Be ([System.Drawing.Point]::new(700, 324))
+    }
+
+    It 'opens above the text cursor when there is no room below' {
+        $caret = [System.Drawing.Rectangle]::new(700, 900, 2, 20)
+        Get-PopupLocation $size $pointer $caret $area | Should Be ([System.Drawing.Point]::new(700, 496))
+    }
+
+    It 'stays inside the work area' {
+        $caret = [System.Drawing.Rectangle]::new(1800, 50, 2, 20)
+        Get-PopupLocation $size $pointer $caret $area | Should Be ([System.Drawing.Point]::new(1360, 74))
+        $small = [System.Drawing.Rectangle]::new(0, 0, 1920, 500)   # no room above or below
+        Get-PopupLocation $size $pointer ([System.Drawing.Rectangle]::new(700, 200, 2, 20)) $small |
+            Should Be ([System.Drawing.Point]::new(700, 100))
+    }
+}
+
 Describe 'Hide-Popup' {
     It 'clears the list, the preview and the filter text so that nothing stays in the hidden window' {
         Reset-TestState

@@ -430,7 +430,7 @@ try {
 
     # --- tray menu: Memory limit > 1 GB ---
     $memoryChanged = $false
-    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 6 + $keyRight))) {   # 6x Down -> Memory limit
+    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 7 + $keyRight))) {   # 7x Down -> Memory limit
         Wait-Milliseconds 300
         Save-MenuImages "tray-menu-memory-$Theme"
         if (Send-MenuKeys $keyUp, $keyEnter) {   # Up wraps around to the last item, 1 GB
@@ -439,8 +439,55 @@ try {
     }
     Add-Result 'Tray menu: memory limit 1 GB' $memoryChanged
 
+    # --- tray menu: Open at > Text cursor; the hotkey then opens the popup below the text cursor ---
+    $openAtChanged = $caretFound = $false
+    $caret = New-Object TestNative+Rect      # all zero until measured
+    $popupRect = New-Object TestNative+Rect
+    $accessibleCaret = [System.Drawing.Rectangle]::Empty
+    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 6 + $keyRight))) {   # 6x Down -> Open at
+        Wait-Milliseconds 300
+        if (Send-MenuKeys $keyUp, $keyEnter) {   # Up wraps around to the last item, Text cursor
+            $openAtChanged = Wait-Until { (Get-Content $log -Raw) -match 'Popup opens at: TextCursor' }
+        }
+    }
+    if ($openAtChanged -and [TestNative]::Activate($target.Handle)) {
+        $targetBox.Text = "psclip test: text cursor`nsecond line"
+        [void]$targetBox.Focus()
+        $targetBox.Select($targetBox.TextLength, 0)
+        Wait-Milliseconds 200
+        $caret = [TestNative]::CaretOf($target.Handle)
+        # The same text cursor through its accessible object (OBJID_CARET), the way browsers and
+        # Electron apps report it - psclip's own code, compiled into this process.
+        if (-not ('PsClip.Caret' -as [type])) {
+            $caretSource = Join-Path $PSScriptRoot '..\src\Caret.cs'
+            Add-Type -Path $caretSource -ReferencedAssemblies System.Drawing, Accessibility
+        }
+        $accessibleCaret = [PsClip.Caret]::FromAccessible($targetBox.Handle)
+        if (Show-TestPopup) {
+            $popupRect = [TestNative]::WindowRectOf($popup)
+            $caretFound = (Get-Content $log -Raw) -match 'Text cursor found'
+            Hide-TestPopup
+        }
+    }
+    $atCaret = $false
+    if ($popupRect.Bottom -gt $popupRect.Top -and $caret.Bottom -gt $caret.Top) {
+        # Below the text cursor (or above it, at the screen's bottom), at its left edge unless that
+        # would push the popup off the screen
+        $area = [Screen]::FromPoint([System.Drawing.Point]::new($caret.Left, $caret.Top)).WorkingArea
+        $popupHeight = $popupRect.Bottom - $popupRect.Top
+        $popupWidth = $popupRect.Right - $popupRect.Left
+        $expectedLeft = [Math]::Max($area.Left, [Math]::Min($caret.Left, $area.Right - $popupWidth))
+        $vertical = $popupRect.Top -eq $caret.Bottom + 4 -or $popupRect.Top -eq $caret.Top - 4 - $popupHeight
+        $atCaret = $caretFound -and $vertical -and $popupRect.Left -eq $expectedLeft
+    }
+    $detail = "caret $($caret.Left),$($caret.Top)-$($caret.Bottom); popup $($popupRect.Left),$($popupRect.Top)"
+    Add-Result 'Tray menu: open at the text cursor' $atCaret "$detail; logged: $caretFound"
+    $sameCaret = -not $accessibleCaret.IsEmpty -and [Math]::Abs($accessibleCaret.Top - $caret.Top) -le 2 -and
+        [Math]::Abs($accessibleCaret.Left - $caret.Left) -le 2
+    Add-Result 'The text cursor is found through accessibility too (browsers)' $sameCaret "$accessibleCaret"
+
     # --- tray menu: Keep awake (presses F15 after $keepAwakeSeconds s without input) ---
-    $keepAwakeItem = @($keyDown) * 7 + $keyEnter   # 7x Down -> Keep awake
+    $keepAwakeItem = @($keyDown) * 8 + $keyEnter   # 8x Down -> Keep awake
     $idleOn = $idleOff = -1
     if ((Open-TrayMenu) -and (Send-MenuKeys $keepAwakeItem)) {
         $idleOn = Measure-MaxIdle 6000

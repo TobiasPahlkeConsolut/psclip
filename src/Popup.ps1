@@ -7,8 +7,8 @@ using namespace System.Windows.Forms
 
 
 function Show-Popup {
-    # Opens the popup at the mouse cursor. With -PasteIntoActiveWindow, choosing an entry pastes
-    # it into the window that was active before; otherwise the entry is only copied.
+    # Opens the popup at the mouse pointer or the text cursor (OpenAt). With -PasteIntoActiveWindow,
+    # choosing an entry pastes it into the window that was active before; otherwise it is only copied.
     param([switch]$PasteIntoActiveWindow)
 
     $State.PasteTarget = [IntPtr]::Zero
@@ -32,18 +32,44 @@ function Show-Popup {
     $Ui.Search.Text = ''   # normally empty already (Hide-Popup); no refresh while the form is hidden
     Update-PopupList
 
+    # The text cursor of the window the hotkey was pressed in - asked before the popup takes the focus.
     $form = $Ui.Form
-    $cursor = [Cursor]::Position
-    $area = [Screen]::FromPoint($cursor).WorkingArea
-    $x = [Math]::Max($area.Left, [Math]::Min($cursor.X, $area.Right - $form.Width))
-    $y = [Math]::Max($area.Top, [Math]::Min($cursor.Y, $area.Bottom - $form.Height))
-    $form.Location = [Point]::new($x, $y)
+    $caret = [Rectangle]::Empty
+    if ($State.OpenAt -eq 'TextCursor' -and $State.PasteTarget -ne [IntPtr]::Zero) {
+        $caret = [PsClip.Caret]::Find($State.PasteTarget)
+        $how = if ($caret.IsEmpty) { 'not reported: popup at the mouse pointer' } else { 'found' }
+        Write-Verbose "Text cursor $how."
+    }
+    $anchor = if ($caret.IsEmpty) { [Cursor]::Position } else { $caret.Location }
+    $area = [Screen]::FromPoint($anchor).WorkingArea
+    $form.Location = Get-PopupLocation -Size $form.Size -Pointer ([Cursor]::Position) -Caret $caret -Area $area
 
     $form.Show()
     [void][PsClip.Native]::ForceForeground($form.Handle)
     Write-Verbose "Popup in front: $([PsClip.Native]::LastActivation)."
     $form.Activate()
     [void]$Ui.Search.Focus()
+}
+
+function Get-PopupLocation {
+    # Top-left corner of the popup: just below the text cursor - above it if there is no room below -
+    # or, without a text cursor (Rectangle.Empty), at the mouse pointer. Always inside the work area.
+    param([Size]$Size, [Point]$Pointer, [Rectangle]$Caret, [Rectangle]$Area)
+
+    $gap = 4
+    if ($Caret.IsEmpty) {
+        $x = $Pointer.X
+        $y = $Pointer.Y
+    }
+    else {
+        $x = $Caret.Left
+        $y = $Caret.Bottom + $gap
+        $above = $Caret.Top - $gap - $Size.Height
+        if ($y + $Size.Height -gt $Area.Bottom -and $above -ge $Area.Top) { $y = $above }
+    }
+    $x = [Math]::Max($Area.Left, [Math]::Min($x, $Area.Right - $Size.Width))
+    $y = [Math]::Max($Area.Top, [Math]::Min($y, $Area.Bottom - $Size.Height))
+    [Point]::new($x, $y)
 }
 
 function Reset-PopupSize {

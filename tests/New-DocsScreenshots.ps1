@@ -165,8 +165,8 @@ try {
             Hide-TestPopup
 
             if ($theme -eq 'Dark') {
-                # Tray menu, "Memory limit" highlighted (6x Down)
-                $menuOpen = (Open-TrayMenu) -and (Send-MenuKeys (@([byte]0x28) * 6))
+                # Tray menu, "Memory limit" highlighted (7x Down)
+                $menuOpen = (Open-TrayMenu) -and (Send-MenuKeys (@([byte]0x28) * 7))
                 if (-not $menuOpen) { throw 'The tray menu did not open.' }
                 Wait-Milliseconds 300
                 Save-TrayMenuImage 'tray-menu-dark.png'

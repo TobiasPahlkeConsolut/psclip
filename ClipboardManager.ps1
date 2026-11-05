@@ -9,7 +9,8 @@
     content too. Nothing is ever written to disk: the history (pinned entries included) is gone
     when the script exits.
 
-    Press the hotkey (see -Hotkey) to open the history next to the mouse cursor:
+    Press the hotkey (see -Hotkey) to open the history at the mouse pointer (or the text cursor,
+    see -OpenAt):
 
         type to filter        every word must match, case-insensitive
         Up/Down, PgUp/PgDn    move the selection
@@ -25,8 +26,8 @@
     (also the text recognized in an image); drag the bar on its top edge to make it bigger, or
     the bar between an image and its text. Sizes and F3 are reset when the popup opens again.
     Left-click the tray icon to open the history in copy-only mode; right-click it for "Clear
-    history", the settings (hotkey, dark mode, window size, memory limit) and "Exit". Settings
-    changed there last until the script exits.
+    history", the settings (hotkey, dark mode, window size, where the popup opens, memory limit) and
+    "Exit". Settings changed there last until the script exits.
 
     Entries that the source application marks as private (password managers set the
     ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory formats) are
@@ -63,6 +64,11 @@
     Size of the history popup: S, M (default) or L - mostly its height. The popup opens at this
     size every time; resizing it by hand lasts until it closes. "Window size" in the tray menu
     changes it.
+
+.PARAMETER OpenAt
+    Where the hotkey opens the popup: Mouse (default, at the mouse pointer) or TextCursor (below
+    the text cursor of the window you are typing in; at the mouse pointer when that program does
+    not report its text cursor, e.g. a terminal). "Open at" in the tray menu changes it.
 
 .PARAMETER Preview
     Open the popup with the preview shown. F3 switches it while the popup is open; the next time
@@ -115,6 +121,9 @@ param(
     [ValidateSet('S', 'M', 'L')]
     [string]$Size = 'M',
 
+    [ValidateSet('Mouse', 'TextCursor')]
+    [string]$OpenAt = 'Mouse',
+
     [switch]$Preview,
 
     [switch]$KeepAwake,
@@ -148,7 +157,7 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 # src\*.cs: Win32 calls, the hidden clipboard window, history entries, menu colors - compiled together.
 if (-not ('PsClip.Native' -as [type])) {
     $csFiles = (Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs').FullName
-    Add-Type -Path $csFiles -ReferencedAssemblies System.Windows.Forms, System.Drawing
+    Add-Type -Path $csFiles -ReferencedAssemblies System.Windows.Forms, System.Drawing, Accessibility
 }
 
 #endregion
@@ -261,6 +270,7 @@ $State = @{
     HotkeyActive         = $false
     ThemeSetting         = $Theme                # Dark, Light or Auto; the tray menu switches it
     PopupSize            = $Size                 # S, M or L; the tray menu changes it
+    OpenAt               = @('Mouse', 'TextCursor') -eq $OpenAt | Select-Object -First 1   # the tray menu changes it
     PreviewVisible       = $Preview.IsPresent    # F3 switches it while the popup is open
     PreviewDefault       = $Preview.IsPresent    # how the popup opens
     PreviewTextShare     = $PreviewTextShare     # text below an image; the bar between them changes it

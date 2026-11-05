@@ -17,7 +17,7 @@ See [README.md](README.md) for features and usage.
 | `src/Ocr.ps1`                     | Text in images (Windows.Media.Ocr), in the background                |
 | `src/KeepAwake.ps1`               | Keep awake (unrelated to the clipboard)                              |
 | `src/Window.ps1`                  | Building the popup window, the menus and the tray icon               |
-| `src/*.cs`                        | C# helpers, compiled together with `Add-Type`: `Native` (Win32 calls), `ClipboardHost` (hidden window), `ClipEntry`, `MenuRenderer` |
+| `src/*.cs`                        | C# helpers, compiled together with `Add-Type`: `Native` (Win32 calls), `ClipboardHost` (hidden window), `ClipEntry`, `MenuRenderer`, `Caret` (text cursor of another program) |
 | `Install.ps1`                     | Creates/removes Start menu and autostart shortcuts                   |
 | `tests/<Part>.Tests.ps1`          | Unit tests per part file (Pester 3.4 syntax)                         |
 | `tests/UnitTestSupport.ps1`       | Shared unit-test setup: loads the app, `Reset-TestState`, helpers    |
@@ -105,7 +105,10 @@ See [README.md](README.md) for features and usage.
 - Pasting: `Invoke-SelectedEntry` sets the clipboard, `ForceForeground`s the window that was active when the hotkey
   was pressed (while the popup is still open - hiding it first lets Windows activate another window), and
   `PsClip.Native.PasteInto` waits for released keys, checks the foreground again and sends Ctrl+V with one
-  `SendInput` call. Never send keystrokes without such a foreground check - also not in tests or ad-hoc diagnostic
+  `SendInput` call. With `-OpenAt TextCursor` (`$State.OpenAt`), `Show-Popup` asks `PsClip.Caret.Find` for the text
+  cursor of that window before the popup takes the focus: the system caret (`GetGUIThreadInfo`), else the
+  accessible caret object (`OBJID_CARET`, browsers and Electron apps; skipped for hung windows, as asking waits);
+  `Get-PopupLocation` places the popup below it, above it at the screen's bottom, or at the mouse pointer. Never send keystrokes without such a foreground check - also not in tests or ad-hoc diagnostic
   scripts: they would type into whatever window the user has in front.
 - `ForceForeground` tries a plain `SetForegroundWindow` first (allowed after a real hotkey press or tray click) and
   attaches to another thread's input queue only as a fallback: attaching can leave a rich text box (Outlook, Word)
@@ -182,9 +185,10 @@ See [README.md](README.md) for features and usage.
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Invoke-UnitTests.ps1
    ```
-2. End-to-end test - **ask the user first** (or have their standing permission): it opens windows on their desktop
-   and sends real keystrokes for about 45 seconds (guarded by foreground checks; the clipboard is restored
-   afterwards). It runs its own instance next to the user's psclip, which records the test's entries
+2. End-to-end test - **ask the user first** (or have their standing permission), and in any case tell them to step
+   away from the PC and wait for their go: it opens windows on their desktop and sends real keystrokes for about a
+   minute per theme (guarded by foreground checks; the clipboard is restored afterwards) - typing meanwhile makes
+   steps fail. It runs its own instance next to the user's psclip, which records the test's entries
    (`psclip test: ...`). It navigates the tray menu by counting `Down` presses (`Send-MenuKeys`) - update those
    counts when the menu order changes:
    ```powershell

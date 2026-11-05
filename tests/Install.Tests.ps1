@@ -69,12 +69,13 @@ Describe 'Get-ShortcutArguments' {
 
     It 'passes the settings on unchanged, also a hotkey ending in a backslash' {
         $line = Get-ShortcutArguments @{
-            Hotkey = 'Ctrl+\'; Theme = 'Light'; MaxMemory = '500MB'
+            Hotkey = 'Ctrl+\'; Theme = 'Light'; MaxMemory = '500MB'; OpenAt = 'TextCursor'
             Preview = [switch]$true; KeepAwake = [switch]$true
         }
         $parsed = [ArgvParser]::Split('conhost.exe ' + $line)
         $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
-        $afterFile -join ' ' | Should BeExactly '-Hotkey Ctrl+\ -MaxMemory 500MB -Theme Light -Preview -KeepAwake'
+        $afterFile -join ' ' |
+            Should BeExactly '-Hotkey Ctrl+\ -MaxMemory 500MB -Theme Light -OpenAt TextCursor -Preview -KeepAwake'
     }
 
     It 'accepts the parameter dictionary of Install.ps1 ($PSBoundParameters), not just hashtables' {

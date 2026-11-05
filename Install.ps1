@@ -29,6 +29,9 @@
 .PARAMETER Size
     Passed on to ClipboardManager.ps1: popup size S, M (default) or L.
 
+.PARAMETER OpenAt
+    Passed on to ClipboardManager.ps1: where the hotkey opens the popup, Mouse (default) or TextCursor.
+
 .PARAMETER Preview
     Passed on to ClipboardManager.ps1: open the popup with the preview (F3) shown.
 
@@ -80,6 +83,10 @@ param(
     [Parameter(ParameterSetName = 'Install')]
     [ValidateSet('S', 'M', 'L')]
     [string]$Size,
+
+    [Parameter(ParameterSetName = 'Install')]
+    [ValidateSet('Mouse', 'TextCursor')]
+    [string]$OpenAt,
 
     [Parameter(ParameterSetName = 'Install')]
     [switch]$Preview,
@@ -155,7 +162,7 @@ function Get-ShortcutArguments {
     param([System.Collections.IDictionary]$Settings)
 
     $arguments = @('--headless', $powershellExe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managerScript)
-    foreach ($name in 'Hotkey', 'MaxMemory', 'Theme', 'Size', 'KeepAwakeSeconds') {
+    foreach ($name in 'Hotkey', 'MaxMemory', 'Theme', 'Size', 'OpenAt', 'KeepAwakeSeconds') {
         if ($Settings.ContainsKey($name)) { $arguments += "-$name", [string]$Settings[$name] }
     }
     foreach ($name in 'Preview', 'KeepAwake') {

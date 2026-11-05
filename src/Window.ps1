@@ -330,6 +330,22 @@ function New-TrayIcon {
     }
     [void]$menu.Items.Add($Ui.SizeMenuItem)
 
+    $Ui.OpenAtMenuItem = [ToolStripMenuItem]::new('Open at')
+    $openAtOptions = @{ Tag = 'Mouse'; Text = 'Mouse pointer'; Tip = $null },
+        @{ Tag = 'TextCursor'; Text = 'Text cursor'; Tip = 'Below the text cursor, if the program reports it' }
+    foreach ($option in $openAtOptions) {
+        $item = $Ui.OpenAtMenuItem.DropDownItems.Add($option.Text)
+        $item.Tag = $option.Tag
+        $item.ToolTipText = $option.Tip
+        $item.add_Click({
+            param($source, $e)
+            $State.OpenAt = $source.Tag
+            Write-Verbose "Popup opens at: $($source.Tag)."
+        })
+    }
+    $Ui.OpenAtMenuItem.DropDown.ShowItemToolTips = $true
+    [void]$menu.Items.Add($Ui.OpenAtMenuItem)
+
     $Ui.MemoryMenuItem = [ToolStripMenuItem]::new('Memory limit')
     $Ui.MemoryMenuItem.ToolTipText = 'Memory the history may use; the oldest unpinned entries are dropped'
     foreach ($limit in $MemoryLimits.Keys) {
@@ -369,6 +385,9 @@ function Update-TrayMenu {
     $Ui.DarkModeMenuItem.Checked = $State.IsDark
     foreach ($item in $Ui.SizeMenuItem.DropDownItems) {
         $item.Checked = $item.Tag -eq $State.PopupSize
+    }
+    foreach ($item in $Ui.OpenAtMenuItem.DropDownItems) {
+        $item.Checked = $item.Tag -eq $State.OpenAt
     }
     $Ui.MemoryMenuItem.Text = "Memory limit ($(Format-MemorySize (Get-HistorySize)) used)"
     foreach ($item in $Ui.MemoryMenuItem.DropDownItems) {

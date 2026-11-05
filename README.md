@@ -13,8 +13,8 @@ The history lives in memory only and is gone when the script exits.
 
 - Records all text you copy, newest first, up to a **memory limit** (100 MB, 500 MB or 1 GB, switchable in the tray
   menu) - the oldest entries are dropped; copying an entry again moves it to the top
-- **Hotkey popup** (default `Ctrl+Ö` on a German keyboard) next to the mouse cursor: type to filter, `Enter` pastes
-  into the window you were working in
+- **Hotkey popup** (default `Ctrl+Ö` on a German keyboard) at the mouse pointer - or below the text cursor, switchable
+  in the tray menu: type to filter, `Enter` pastes into the window you were working in
 - **Keeps the formatting** (HTML and RTF, e.g. from Word, Outlook or a browser): `Enter` pastes with formatting,
   `Shift+Enter` as plain text
 - **Images** too, e.g. screenshots: shown with a thumbnail
@@ -101,7 +101,8 @@ conhost.exe --headless powershell.exe -NoProfile -File .\ClipboardManager.ps1
 
 ## Usage
 
-Press the hotkey anywhere. The popup opens at the mouse cursor:
+Press the hotkey anywhere. The popup opens at the mouse pointer, or - with *Open at > Text cursor* in the tray menu
+(`-OpenAt TextCursor`) - just below the text cursor of the window you are typing in:
 
 | Key                            | Action                                           |
 | ------------------------------ | ------------------------------------------------ |
@@ -138,6 +139,7 @@ The **tray icon** (a small blue clipboard, possibly in the `^` overflow area of 
   - *Change hotkey* - press the new combination
   - *Dark mode* - on / off
   - *Window size* - Small, Medium, Large
+  - *Open at* - Mouse pointer, Text cursor
   - *Memory limit* - 100 MB, 500 MB, 1 GB; shows how much the history uses. A lower limit drops the oldest
     entries right away
   - *Keep awake* - on / off (off by default)
@@ -162,6 +164,7 @@ windows). Windows then never sees the session as idle. While you are working, no
 | `-Hotkey`           | `Ctrl+Ö` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
 | `-Theme`            | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                    |
 | `-Size`             | `M`      | Popup size `S`, `M` or `L` - mostly the height (about 6, 10 or 17 entries visible) |
+| `-OpenAt`           | `Mouse`  | Where the hotkey opens the popup: `Mouse` (pointer) or `TextCursor`         |
 | `-MaxMemory`        | `100MB`  | Memory the history may use: `100MB`, `500MB` or `1GB` (pinned entries count, but are never dropped) |
 | `-MaxEntryLength`   | `1000000`| Texts with more characters are not recorded                                 |
 | `-Preview`          | off      | Open the popup with the preview (`F3`) shown                                |
@@ -207,6 +210,9 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 - **The memory limit** counts what the history stores: texts with their formatting, images (PNG-compressed, plus a
   thumbnail) and the text recognized in them. psclip itself - PowerShell and .NET - needs about 100 MB on top. The
   list shows the first 1,000 matching entries; type to find older ones (the filter searches all of them).
+- **Opening at the text cursor** needs the program to report where its text cursor is. Classic Windows programs and
+  Office do, browsers and Electron apps (VS Code, Teams) report it for screen magnifiers; others, e.g. terminals,
+  don't - then the popup opens at the mouse pointer.
 - **In memory only** means psclip never writes the history anywhere. Windows itself may still move memory to the
   page file or into a crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is
