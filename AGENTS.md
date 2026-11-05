@@ -4,7 +4,7 @@ Guidance for coding agents (Claude Code, Codex, Copilot, ...) working on this re
 
 ## Project
 
-psclip: a minimal Ditto-like clipboard history for Windows, written in Windows PowerShell 5.1 with a little C#.
+psclip: a minimal clipboard history for Windows, written in Windows PowerShell 5.1 with a little C#.
 See [README.md](README.md) for features and usage.
 
 | File                              | Purpose                                                              |

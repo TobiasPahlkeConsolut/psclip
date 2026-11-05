@@ -1,7 +1,7 @@
 # psclip
 
-A small clipboard history for Windows, inspired by [Ditto](https://ditto-cp.sourceforge.io/) but much simpler:
-a PowerShell script, no extra software, no admin rights - and **nothing is written to disk** unless you ask for it.
+A small clipboard history for Windows: a PowerShell script, no extra software, no admin rights - and **nothing is
+written to disk** unless you ask for it.
 The history lives in memory only and is gone when the script exits; only pinned entries can be kept, encrypted
 (*Keep pinned entries*, off by default).
 
@@ -45,10 +45,9 @@ The history lives in memory only and is gone when the script exits; only pinned 
 then in a PowerShell window in your Downloads folder:
 
 ```powershell
-Unblock-File .\psclip-1.0.0.zip          # Windows marks downloads; unblocked, PowerShell runs the scripts
 Expand-Archive .\psclip-1.0.0.zip -DestinationPath $HOME\Documents   # creates Documents\psclip
 cd $HOME\Documents\psclip
-.\Install.ps1 -Autostart
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
 
 **Or with git:**
@@ -56,7 +55,7 @@ cd $HOME\Documents\psclip
 ```powershell
 git clone https://github.com/TobiasPahlkeConsolut/psclip.git
 cd psclip
-.\Install.ps1 -Autostart
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
 
 **Updating:** extract the new ZIP over the old `psclip` folder (or `git pull`) - your saved pinned entries
@@ -79,23 +78,19 @@ What `Install.ps1` does - and doesn't:
 Settings are passed on to the shortcuts:
 
 ```powershell
-.\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L -KeepAwake
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -KeepAwake
 ```
 
-Running `Install.ps1` again replaces the shortcuts, so this is also how you change settings permanently.
+Running `Install.ps1` again replaces the shortcuts, so this is also how you change settings permanently. Settings you
+leave out get their defaults again (see [Options](#options)).
 
-### Execution policy (only if needed)
+### Execution policy
 
-With the common setting `RemoteSigned` (check with `Get-ExecutionPolicy -List`) the commands above work as they
-are. Only if Windows refuses to run the scripts:
-
-- **ZIP extracted without unblocking it first**: Windows marks the files as coming from the internet. Unblock them
-  once in the psclip folder: `Get-ChildItem -Recurse -Filter *.ps1 | Unblock-File`
-- **Stricter policy** (`Restricted`, `AllSigned`): bypass it for this one call - it does not change your settings:
-  `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart`
-
-The shortcuts start psclip with `-ExecutionPolicy Bypass` (for that process only), so autostart works with either
-setting - unless the execution policy is enforced by Group Policy, which a command line cannot override.
+The commands above start `Install.ps1` with `-ExecutionPolicy Bypass`: for that one PowerShell process only - your
+execution policy stays as it is. So they work with any setting (`Restricted`, `RemoteSigned`, ...) and also for files
+Windows marks as downloaded from the internet; `Install.ps1` removes that mark from psclip's files. The shortcuts start
+psclip the same way, so autostart works too - unless the execution policy is enforced by Group Policy, which a command
+line cannot override. Where scripts are allowed anyway, `.\Install.ps1 -Autostart` does the same.
 
 ## Run without installing
 
@@ -181,7 +176,7 @@ windows). Windows then never sees the session as idle. While you are working, no
 
 By default pinned entries are gone when psclip exits, like the rest of the history. With *Keep pinned entries* in the
 tray menu they are kept. Like all tray settings, the switch itself lasts until psclip exits - to have it on at every
-start, use `-KeepPinned` (e.g. `.\Install.ps1 -KeepPinned`).
+start, pass `-KeepPinned` to `Install.ps1` (with your other settings).
 
 - The pinned entries are saved to **`pinned.dat` next to `ClipboardManager.ps1`** - texts with their formatting,
   images as PNG - every time they change (pin, unpin, remove, copying a pinned text again), and loaded at the next
@@ -224,7 +219,7 @@ Hotkeys that would get in the way of typing are refused: a plain key (only `F1`-
 on a German keyboard).
 
 The default hotkey is written as `Ctrl+Oemtilde` in the script (it must stay ASCII). It is the same physical key on
-every layout: `Ctrl+Ö` on a German keyboard, ``Ctrl+` `` on a US keyboard (Ditto's default). On German keyboards VS
+every layout: `Ctrl+Ö` on a German keyboard, ``Ctrl+` `` on a US keyboard. On German keyboards VS
 Code uses `Ctrl+Ö` to toggle its terminal; the global hotkey takes precedence, so pick another one if you need that.
 
 `Get-Help .\ClipboardManager.ps1 -Full` shows the complete help.
@@ -232,7 +227,7 @@ Code uses `Ctrl+Ö` to toggle its terminal; the global hotkey takes precedence, 
 ## Uninstall
 
 ```powershell
-.\Install.ps1 -Uninstall
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Uninstall
 ```
 
 This stops a running instance and removes both shortcuts. Then delete the folder (with *Keep pinned entries* it also

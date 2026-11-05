@@ -61,9 +61,10 @@
     .\Install.ps1 -Uninstall
 
 .NOTES
-    Run it without administrator rights. If the execution policy does not allow local scripts:
+    Run it without administrator rights, best with the execution policy bypassed for this one call - it
+    then works with any execution policy and for downloaded files (it unblocks psclip's files):
     powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
-    The shortcuts start the manager with -ExecutionPolicy Bypass (for that process only).
+    The shortcuts start the manager the same way, with -ExecutionPolicy Bypass for that process only.
 #>
 
 #Requires -PSEdition Desktop
