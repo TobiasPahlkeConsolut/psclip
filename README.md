@@ -3,7 +3,7 @@
 A small clipboard history for Windows: a PowerShell script, no extra software, no admin rights - and **nothing is
 written to disk** unless you ask for it.
 The history lives in memory only and is gone when the script exits; only pinned entries can be kept, encrypted
-(*Keep pinned entries*, off by default).
+(*Keep pinned entries* - on when installed with `Install.ps1`, which you can turn off).
 
 <p>
   <img src="docs/popup-dark.png" alt="History popup in dark mode, with a pinned entry" width="49%">
@@ -67,7 +67,9 @@ What `Install.ps1` does - and doesn't:
 - It **does not copy anything**. psclip runs from the folder you cloned it to; keep that folder (or run
   `Install.ps1` again after moving it).
 - It creates a **Clipboard Manager** shortcut in your Start menu
-  (`%APPDATA%\Microsoft\Windows\Start Menu\Programs`), so you can start psclip like any app.
+  (`%APPDATA%\Microsoft\Windows\Start Menu\Programs`), so you can start psclip like any app. Without other
+  parameters, psclip then starts with a memory limit of 500 MB, opens the popup at the text cursor and keeps pinned
+  entries (see [Options](#options)).
 - With `-Autostart` it creates the same shortcut in your Startup folder (`shell:startup`), so psclip starts when you
   sign in. Without `-Autostart`, an existing autostart shortcut is removed.
 - It starts psclip right away. If psclip is already running, it asks before restarting it (the history would be
@@ -174,9 +176,9 @@ windows). Windows then never sees the session as idle. While you are working, no
 
 ### Keeping pinned entries
 
-By default pinned entries are gone when psclip exits, like the rest of the history. With *Keep pinned entries* in the
-tray menu they are kept. Like all tray settings, the switch itself lasts until psclip exits - to have it on at every
-start, pass `-KeepPinned` to `Install.ps1` (with your other settings).
+With *Keep pinned entries* on, pinned entries survive restarts; otherwise they are gone when psclip exits, like the
+rest of the history. `Install.ps1` switches it on (`-KeepPinned`) unless you pass `-KeepPinned:$false`;
+`ClipboardManager.ps1` started by itself has it off. The tray menu switches it, until psclip exits.
 
 - The pinned entries are saved to **`pinned.dat` next to `ClipboardManager.ps1`** - texts with their formatting,
   images as PNG - every time they change (pin, unpin, remove, copying a pinned text again), and loaded at the next
@@ -199,6 +201,10 @@ start, pass `-KeepPinned` to `Install.ps1` (with your other settings).
 - Git ignores `pinned.dat` (`.gitignore`), so it never ends up in a commit.
 
 ## Options
+
+The parameters of `ClipboardManager.ps1`; `Install.ps1` passes them on to the shortcuts. The defaults below are those of
+`ClipboardManager.ps1` started by itself. **`Install.ps1` uses three other defaults**: `-MaxMemory 500MB`,
+`-OpenAt TextCursor` and `-KeepPinned` (`-KeepPinned:$false` leaves it off).
 
 | Parameter           | Default  | Description                                                                 |
 | ------------------- | -------- | --------------------------------------------------------------------------- |

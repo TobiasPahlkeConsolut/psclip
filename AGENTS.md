@@ -236,6 +236,13 @@ See [README.md](README.md) for features and usage.
    first) and check the new `docs\*.png` before committing them. With `-DefaultHotkey` the tray menu shows the
    default hotkey as users see it - only possible while the user's psclip is not running.
 
+## Installer defaults
+
+`Install.ps1` starts psclip with three defaults of its own (`$InstallDefaults`: `-MaxMemory 500MB`,
+`-OpenAt TextCursor`, `-KeepPinned`), merged with the given parameters by `Get-InstallSettings` before
+`Get-ShortcutArguments` builds the command line; `-KeepPinned:$false` turns that one off. `ClipboardManager.ps1`'s own
+defaults stay minimal (100 MB, mouse pointer, nothing saved). Keep README "Options" and both help texts in sync.
+
 ## Releases
 
 Version numbers are `major.minor.patch`. For a release:

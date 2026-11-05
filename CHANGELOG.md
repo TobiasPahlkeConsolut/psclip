@@ -16,4 +16,5 @@ rights, and nothing written to disk unless you ask for it.
 - Dark and light theme, three popup sizes, hotkey and settings in the tray menu
 - Skips content that password managers mark as private
 - **Keep awake** (optional, unrelated to the clipboard): presses F15 when you have been idle for 30 seconds
-- `Install.ps1` creates Start menu and autostart shortcuts; Windows PowerShell 5.1 only
+- `Install.ps1` creates Start menu and autostart shortcuts, with a memory limit of 500 MB, the popup at the text
+  cursor and *Keep pinned entries* on unless you choose otherwise; Windows PowerShell 5.1 only

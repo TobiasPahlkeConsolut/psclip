@@ -9,6 +9,10 @@
     Terminal as the default terminal, 'powershell -WindowStyle Hidden' would leave an empty
     terminal window open.)
 
+    The installer's defaults differ from those of ClipboardManager.ps1 in three settings: a memory
+    limit of 500MB, the popup at the text cursor, and "Keep pinned entries" on. All other settings
+    are ClipboardManager.ps1's defaults.
+
     Nothing is copied: keep this folder where it is, or run Install.ps1 again after moving it.
     Running it again replaces the shortcuts, so it is also the way to change the settings. If
     psclip is already running, you are asked before it is restarted (its history would be lost).
@@ -21,7 +25,7 @@
     Passed on to ClipboardManager.ps1, e.g. 'Ctrl+Alt+V'. Checked before anything is changed.
 
 .PARAMETER MaxMemory
-    Passed on to ClipboardManager.ps1: memory the history may use, 100MB (default), 500MB or 1GB.
+    Passed on to ClipboardManager.ps1: memory the history may use, 100MB, 500MB (default here) or 1GB.
 
 .PARAMETER Theme
     Passed on to ClipboardManager.ps1: Dark (default), Light or Auto.
@@ -30,7 +34,7 @@
     Passed on to ClipboardManager.ps1: popup size S, M (default) or L.
 
 .PARAMETER OpenAt
-    Passed on to ClipboardManager.ps1: where the hotkey opens the popup, Mouse (default) or TextCursor.
+    Passed on to ClipboardManager.ps1: where the hotkey opens the popup, Mouse or TextCursor (default here).
 
 .PARAMETER Preview
     Passed on to ClipboardManager.ps1: open the popup with the preview (F3) shown.
@@ -43,7 +47,8 @@
 
 .PARAMETER KeepPinned
     Passed on to ClipboardManager.ps1: start with "Keep pinned entries" switched on - pinned entries
-    are saved encrypted to pinned.dat in this folder and survive restarts.
+    are saved encrypted to pinned.dat in this folder and survive restarts. On by default here;
+    -KeepPinned:$false leaves it off.
 
 .PARAMETER Force
     Restart a running psclip without asking.
@@ -56,6 +61,11 @@
 
 .EXAMPLE
     .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L -KeepAwake
+
+.EXAMPLE
+    .\Install.ps1 -MaxMemory 100MB -OpenAt Mouse -KeepPinned:$false
+
+    ClipboardManager.ps1's own defaults instead of the installer's: nothing is saved.
 
 .EXAMPLE
     .\Install.ps1 -Uninstall
@@ -124,6 +134,9 @@ $startMenuShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) $short
 $autostartShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) $shortcutName
 $hostWindowTitle = 'PsClipboardManager'   # hidden window of a running instance (its InstanceName)
 
+# Where the installer's defaults differ from ClipboardManager.ps1's (which stays minimal when run by itself)
+$InstallDefaults = @{ MaxMemory = '500MB'; OpenAt = 'TextCursor'; KeepPinned = $true }
+
 if (-not ('InstallNative' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -178,6 +191,17 @@ function Get-ShortcutArguments {
     }
 
     ($arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
+}
+
+function Get-InstallSettings {
+    # The settings for the shortcuts: $InstallDefaults, overridden by what was given ($PSBoundParameters) -
+    # also -KeepPinned:$false.
+    param([System.Collections.IDictionary]$Bound)
+
+    $settings = @{}
+    foreach ($name in $InstallDefaults.Keys) { $settings[$name] = $InstallDefaults[$name] }
+    foreach ($name in $Bound.Keys) { $settings[$name] = $Bound[$name] }
+    $settings
 }
 
 function Assert-Hotkey {
@@ -249,8 +273,8 @@ function Get-UnloadedPinnedWarning {
 
     $file = Join-Path $Folder 'pinned.dat'
     if ($KeepPinned -or -not (Test-Path -LiteralPath $file)) { return }
-    'pinned.dat holds saved pinned entries, but without -KeepPinned psclip does not load them at start ' +
-        "(only when 'Keep pinned entries' is switched on in its tray menu). Add -KeepPinned to keep them."
+    'pinned.dat holds saved pinned entries, but with -KeepPinned:$false psclip does not load them at start ' +
+        "(only when 'Keep pinned entries' is switched on in its tray menu). Leave it out to keep them."
 }
 
 function Confirm-Restart {
@@ -302,7 +326,8 @@ if (-not (Test-Path -LiteralPath $partsFolder)) {
 Unblock-File -LiteralPath (@($managerScript) + @(Get-ChildItem -LiteralPath $partsFolder -File).FullName)
 if ($PSBoundParameters.ContainsKey('Hotkey')) { Assert-Hotkey $Hotkey }
 
-$shortcutArguments = Get-ShortcutArguments $PSBoundParameters
+$settings = Get-InstallSettings $PSBoundParameters
+$shortcutArguments = Get-ShortcutArguments $settings
 New-Shortcut -Path $startMenuShortcut -Arguments $shortcutArguments
 Write-Host "Start menu shortcut: $startMenuShortcut"
 
@@ -315,7 +340,7 @@ elseif (Test-Path -LiteralPath $autostartShortcut) {
     Write-Host 'Removed the autostart shortcut (use -Autostart to keep it).'
 }
 
-$pinnedWarning = Get-UnloadedPinnedWarning $PSScriptRoot $KeepPinned.IsPresent
+$pinnedWarning = Get-UnloadedPinnedWarning $PSScriptRoot ([bool]$settings['KeepPinned'])
 if ($pinnedWarning) { Write-Warning $pinnedWarning }
 
 $runningId = Get-ManagerProcessId

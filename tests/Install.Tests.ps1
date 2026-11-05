@@ -115,6 +115,27 @@ Describe 'Get-ShortcutArguments' {
     }
 }
 
+Describe 'Get-InstallSettings' {
+    function Get-ArgumentsAfterFile {
+        param([System.Collections.IDictionary]$Bound)
+        $parsed = [ArgvParser]::Split('conhost.exe ' + (Get-ShortcutArguments (Get-InstallSettings $Bound)))
+        $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)] -join ' '
+    }
+
+    It 'starts psclip with 500 MB, at the text cursor and keeping pinned entries when nothing is given' {
+        Get-ArgumentsAfterFile @{} | Should BeExactly '-MaxMemory 500MB -OpenAt TextCursor -KeepPinned'
+    }
+
+    It 'lets every given setting win, also -KeepPinned:$false' {
+        $bound = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+        $bound['MaxMemory'] = '1GB'
+        $bound['OpenAt'] = 'Mouse'
+        $bound['KeepPinned'] = [switch]$false
+        $bound['Size'] = 'L'
+        Get-ArgumentsAfterFile $bound | Should BeExactly '-MaxMemory 1GB -Size L -OpenAt Mouse'
+    }
+}
+
 Describe 'Get-UnloadedPinnedWarning' {
     It 'warns when saved pinned entries would not be loaded without -KeepPinned' {
         [System.IO.File]::WriteAllBytes((Join-Path $TestDrive 'pinned.dat'), [byte[]](1, 2, 3))
