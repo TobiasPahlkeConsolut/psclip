@@ -407,6 +407,13 @@ function Update-TrayText {
     $Ui.Tray.Text = $text
 }
 
+function Show-TrayWarning {
+    # A message at the tray icon - psclip has no window of its own to show problems in.
+    param([string]$Text)
+
+    $Ui.Tray.ShowBalloonTip(8000, 'Clipboard history', $Text, 'Warning')
+}
+
 function New-ClipboardIcon {
     # Draws a small clipboard so the tray icon is not confused with other PowerShell windows.
     $iconSize = [SystemInformation]::SmallIconSize.Width

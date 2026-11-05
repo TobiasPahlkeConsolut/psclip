@@ -140,7 +140,10 @@ function Add-ClipboardEntry {
     # Pinned entries keep their place, others move to the top.
     $pinnedIndex = Find-ClipboardEntry $State.Pinned $Entry
     if ($pinnedIndex -ge 0) {
-        if (-not $Entry.IsImage) { $State.Pinned[$pinnedIndex] = $Entry }
+        if (-not $Entry.IsImage) {
+            $State.Pinned[$pinnedIndex] = $Entry
+            Save-PinnedList   # the newer formatting
+        }
         return
     }
     $index = Find-ClipboardEntry $State.History $Entry
@@ -177,7 +180,10 @@ function Find-ClipboardEntry {
 function Remove-ClipboardEntry {
     param([PsClip.ClipEntry]$Entry)
 
-    if (-not $State.Pinned.Remove($Entry)) {
+    if ($State.Pinned.Remove($Entry)) {
+        Save-PinnedList
+    }
+    else {
         [void]$State.History.Remove($Entry)
     }
 }
@@ -194,6 +200,7 @@ function Switch-ClipboardPin {
         [void]$State.History.Remove($Entry)
         $State.Pinned.Add($Entry)
     }
+    Save-PinnedList
 }
 
 function Move-ClipboardEntryToTop {
@@ -279,4 +286,56 @@ function Clear-ClipboardHistory {
     $State.History.Clear()   # pinned entries stay
     Update-TrayText
     if ($Ui.Form.Visible) { Update-PopupList }
+}
+
+function Get-PinnedFilePath {
+    # -KeepPinned: pinned.dat next to ClipboardManager.ps1. Another instance (-InstanceName) keeps its own file.
+    param([string]$Folder, [string]$Name)
+
+    $file = if ($Name -eq 'PsClipboardManager') { 'pinned.dat' } else { "pinned-$Name.dat" }
+    Join-Path $Folder $file
+}
+
+function Restore-PinnedList {
+    # -KeepPinned, at startup: the pinned entries the last run saved (PsClip.PinnedStore). Returns a
+    # message for the user when the file cannot be read.
+    if (-not $State.PinnedFile) { return }
+
+    try {
+        $entries = [PsClip.PinnedStore]::Load($State.PinnedFile, $Ui.ThumbnailHeight)
+    }
+    catch {
+        # Saving would replace the file with the entries pinned from now on - but it may be readable
+        # again later (e.g. locked only for the moment). So this run does not save at all.
+        $message = $_.Exception.GetBaseException().Message.Trim()
+        $fileName = Split-Path -Leaf $State.PinnedFile
+        Write-Verbose "Could not read the pinned entries from $($State.PinnedFile): $message"
+        $State.PinnedFile = $null
+        return "Could not read the saved pinned entries ($fileName): $message Pinned entries are not " +
+            'saved until psclip can read the file - delete it to start over.'
+    }
+    foreach ($entry in $entries) {
+        $State.Pinned.Add($entry)
+        if ($entry.IsImage) { Start-ImageOcr $entry }   # unless its text was recognized before saving
+    }
+    Write-Verbose "Restored $($entries.Count) pinned entries from $($State.PinnedFile)."
+}
+
+function Save-PinnedList {
+    # -KeepPinned: writes the pinned entries after every change, not at exit - a crash, a killed process
+    # or a power cut would skip that. Pinned entries change rarely, so this costs next to nothing.
+    if (-not $State.PinnedFile) { return }
+
+    try {
+        [PsClip.PinnedStore]::Save($State.PinnedFile, $State.Pinned)
+        $State.PinnedSaveFailed = $false
+    }
+    catch {
+        $message = $_.Exception.GetBaseException().Message.Trim()
+        Write-Verbose "Could not save the pinned entries to $($State.PinnedFile): $message"
+        if (-not $State.PinnedSaveFailed) {
+            $State.PinnedSaveFailed = $true   # told once, not at every change
+            Show-TrayWarning "Could not save the pinned entries: $message"
+        }
+    }
 }

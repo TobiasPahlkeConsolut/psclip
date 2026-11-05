@@ -57,7 +57,9 @@ function Reset-TestState {
     $script:State = @{
         History              = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
         Pinned               = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
-        Filtered             = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
+        PinnedFile           = $null
+        PinnedSaveFailed     = $false
+        Filtered            = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
         FilteredPinnedCount  = 0
         FoundCount           = 0
         MemoryLimit          = '100MB'

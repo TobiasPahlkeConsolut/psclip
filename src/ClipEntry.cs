@@ -55,17 +55,35 @@ namespace PsClip
 
         public static ClipEntry FromImage(Image image, int thumbnailHeight)
         {
-            ClipEntry entry = new ClipEntry(null);
+            byte[] png;
             using (MemoryStream stream = new MemoryStream())
             {
                 image.Save(stream, ImageFormat.Png);
-                entry.Png = stream.ToArray();
+                png = stream.ToArray();
             }
+            return NewImageEntry(png, image, thumbnailHeight);
+        }
+
+        // An image entry from saved PNG bytes (PinnedStore). The bytes are kept as they are, so the
+        // entry is the same image (SameContent) as the one that was saved.
+        public static ClipEntry FromPng(byte[] png, int thumbnailHeight)
+        {
+            using (MemoryStream stream = new MemoryStream(png))
+            using (Image image = Image.FromStream(stream))
+            {
+                return NewImageEntry(png, image, thumbnailHeight);
+            }
+        }
+
+        static ClipEntry NewImageEntry(byte[] png, Image image, int thumbnailHeight)
+        {
+            ClipEntry entry = new ClipEntry(null);
+            entry.Png = png;
             entry.Width = image.Width;
             entry.Height = image.Height;
             using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
             {
-                entry.imageHash = Convert.ToBase64String(sha.ComputeHash(entry.Png));
+                entry.imageHash = Convert.ToBase64String(sha.ComputeHash(png));
             }
             entry.Thumbnail = CreateThumbnail(image, thumbnailHeight);
             entry.thumbnailBytes = 4L * entry.Thumbnail.Width * entry.Thumbnail.Height;   // 32 bits per pixel

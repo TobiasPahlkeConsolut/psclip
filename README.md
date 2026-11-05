@@ -1,8 +1,9 @@
 # psclip
 
 A small clipboard history for Windows, inspired by [Ditto](https://ditto-cp.sourceforge.io/) but much simpler:
-a PowerShell script, no extra software, no admin rights - and **nothing is ever written to disk**.
-The history lives in memory only and is gone when the script exits.
+a PowerShell script, no extra software, no admin rights - and **nothing is written to disk** unless you ask for it.
+The history lives in memory only and is gone when the script exits; only pinned entries can be kept, encrypted
+(`-KeepPinned`).
 
 <p>
   <img src="docs/popup-dark.png" alt="History popup in dark mode, with a pinned entry" width="49%">
@@ -22,7 +23,8 @@ The history lives in memory only and is gone when the script exits.
   so typing a word from a screenshot finds it; typing `image` lists all images
 - **Preview** (`F3`) of the selected entry below the list: the full text or the image with its recognized text -
   select and copy any part of it; drag the top edge to make the preview bigger
-- **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"
+- **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"; with `-KeepPinned` they
+  also survive a restart (saved encrypted for your Windows account)
 - **Dark mode** (default) or light mode, switchable from the tray menu
 - **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
 - **Configurable hotkey** - as a parameter or at runtime from the tray menu
@@ -157,6 +159,24 @@ every second how long there has been no mouse or keyboard input; after 30 second
 the **F15** key, which no keyboard has and no program uses (unlike Pause, which freezes the output of console
 windows). Windows then never sees the session as idle. While you are working, nothing is sent.
 
+### Keeping pinned entries
+
+By default pinned entries are gone when psclip exits, like the rest of the history. With `-KeepPinned` (e.g.
+`.\Install.ps1 -KeepPinned`) they are kept:
+
+- They are saved to **`pinned.dat` next to `ClipboardManager.ps1`** - texts with their formatting, images as PNG -
+  every time they change (pin, unpin, remove, copying a pinned text again), and loaded at the next start. Not only at
+  exit: a crash, a killed process or a power cut would skip that. Writing goes to a temporary file first, so the old
+  version stays intact if writing is interrupted. Nothing else of the history is ever saved.
+- The file is **encrypted for your Windows account** (DPAPI, the protection Windows' Credential Manager and browsers use
+  for saved passwords): the key comes from your Windows sign-in, so other users of the PC cannot read it, and neither
+  can anyone who copies the file to another computer. Programs running under your own account could decrypt it -
+  like they could read psclip's memory.
+- If the file cannot be read - e.g. after an administrator reset the password of a local Windows account, which
+  makes the key unusable - psclip says so at startup, starts without the pinned entries and does not touch the file
+  (nor save pinned entries) until it can read it again; delete it to start over.
+- Delete `pinned.dat` to remove the saved entries. Git ignores it (`.gitignore`), so it never ends up in a commit.
+
 ## Options
 
 | Parameter           | Default  | Description                                                                 |
@@ -170,6 +190,7 @@ windows). Windows then never sees the session as idle. While you are working, no
 | `-Preview`          | off      | Open the popup with the preview (`F3`) shown                                |
 | `-KeepAwake`        | off      | Start with *Keep awake* switched on                                         |
 | `-KeepAwakeSeconds` | `30`     | Idle seconds before *Keep awake* presses F15                                |
+| `-KeepPinned`       | off      | Keep pinned entries across restarts, encrypted in `pinned.dat` (see [Keeping pinned entries](#keeping-pinned-entries)) |
 | `-InstanceName`     | `PsClipboardManager` | Only to run a second, separate instance (the end-to-end test does)  |
 
 Hotkeys that would get in the way of typing are refused: a plain key (only `F1`-`F11` and `F13`-`F24` work alone),
@@ -188,7 +209,8 @@ Code uses `Ctrl+Ö` to toggle its terminal; the global hotkey takes precedence, 
 .\Install.ps1 -Uninstall
 ```
 
-This stops a running instance and removes both shortcuts. Then delete the folder.
+This stops a running instance and removes both shortcuts. Then delete the folder (with `-KeepPinned` it also holds
+your saved pinned entries, `pinned.dat`).
 
 ## In Task Manager
 
@@ -213,8 +235,8 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 - **Opening at the text cursor** needs the program to report where its text cursor is. Classic Windows programs and
   Office do, browsers and Electron apps (VS Code, Teams) report it for screen magnifiers; others, e.g. terminals,
   don't - then the popup opens at the mouse pointer.
-- **In memory only** means psclip never writes the history anywhere. Windows itself may still move memory to the
-  page file or into a crash dump, like for any program.
+- **In memory only** means psclip never writes the history anywhere - except the pinned entries with `-KeepPinned`.
+  Windows itself may still move memory to the page file or into a crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is
   still put on the clipboard - press `Ctrl+V` yourself.
 - **Combinations already taken** by another program cannot be captured in the *Change hotkey* dialog: nothing

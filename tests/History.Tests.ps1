@@ -403,6 +403,173 @@ Describe 'Clipboard history' {
     }
 }
 
+Describe 'Saved pinned entries (-KeepPinned)' {
+    BeforeEach {
+        Reset-TestState
+        $State.PinnedFile = Join-Path $TestDrive 'pinned.dat'
+        if (Test-Path -LiteralPath $State.PinnedFile) { Remove-Item -LiteralPath $State.PinnedFile }
+    }
+    Mock Show-TrayWarning {}
+
+    function Restart-WithSavedPins {
+        # The next run: empty state with the same file, then the startup step. Returns its message.
+        param([switch]$WithOcr)
+        $file = $State.PinnedFile
+        Reset-TestState
+        $State.PinnedFile = $file
+        if ($WithOcr) {
+            $Ui.OcrEngine = 'stand-in'
+            $Ui.OcrTimer = [pscustomobject]@{ Enabled = $false }
+        }
+        Restore-PinnedList
+    }
+
+    function Read-SavedPins {
+        [PsClip.PinnedStore]::Load($State.PinnedFile, 22)
+    }
+
+    function Add-PinnedEntry {
+        param([PsClip.ClipEntry]$Entry)
+        Add-ClipboardEntry $Entry
+        Switch-ClipboardPin $Entry
+    }
+
+    It 'keeps texts with their formatting and images with their recognized text, in pin order' {
+        $formatted = New-FormattedEntry 'formatted' -Html '<b>formatted</b>' -Rtf '{\rtf1 formatted}'
+        $image = New-ImageEntry 'Red' -Width 400 -Height 100
+        $image.OcrText = 'text in the image'
+        Add-PinnedEntry $formatted
+        Add-PinnedEntry $image
+        Add-PinnedEntry ([PsClip.ClipEntry]::new('plain'))
+
+        Restart-WithSavedPins | Should BeNullOrEmpty
+        $State.Pinned.Count | Should Be 3
+        $State.History.Count | Should Be 0
+        $State.Pinned[0].Text | Should BeExactly 'formatted'
+        $State.Pinned[0].Html | Should BeExactly '<b>formatted</b>'
+        $State.Pinned[0].Rtf | Should BeExactly '{\rtf1 formatted}'
+        $State.Pinned[0].Copied | Should Be $formatted.Copied
+        $State.Pinned[1].SameContent($image) | Should Be $true   # copying the image again finds it
+        "$($State.Pinned[1].Width)x$($State.Pinned[1].Height)" | Should Be '400x100'
+        $State.Pinned[1].Thumbnail.Height | Should Not BeGreaterThan 22
+        $State.Pinned[1].OcrText | Should BeExactly 'text in the image'
+        $State.Pinned[2].Text | Should BeExactly 'plain'
+        $State.Pinned[2].HasFormatting | Should Be $false
+    }
+
+    It 'gives back every text exactly, also unusual characters, and keeps null apart from empty' {
+        $text = 'umlaut ' + [char]0xF6 + ', emoji ' + [char]0xD83D + [char]0xDE00 + ', lone surrogate ' +
+            [char]0xD800 + "`r`nnext line`t"
+        $entry = [PsClip.ClipEntry]::new($text)
+        $entry.Html = ''
+        $noText = New-ImageEntry 'Green'
+        $noText.OcrText = ''
+        $data = [PsClip.PinnedStore]::Serialize([PsClip.ClipEntry[]]@($entry, $noText, (New-ImageEntry 'Blue')))
+        $copy = [PsClip.PinnedStore]::Deserialize($data, 22)
+        $copy[0].Text | Should BeExactly $text
+        $copy[0].SameContent($entry) | Should Be $true
+        $null -ne $copy[0].Html | Should Be $true   # '' stays ''
+        $copy[0].Html.Length | Should Be 0
+        $null -eq $copy[0].Rtf | Should Be $true
+        $null -ne $copy[1].OcrText | Should Be $true   # '' = no text found
+        $copy[1].OcrText.Length | Should Be 0
+        $null -eq $copy[2].OcrText | Should Be $true   # null = not recognized yet
+    }
+
+    It 'recognizes the text again in images saved before it was recognized' {
+        $recognized = New-ImageEntry 'Red'
+        $recognized.OcrText = 'done'
+        $waiting = New-ImageEntry 'Green'
+        Add-PinnedEntry $recognized
+        Add-PinnedEntry $waiting
+        Restart-WithSavedPins -WithOcr
+        $State.OcrQueue.Count | Should Be 1
+        $State.OcrQueue.Peek().SameContent($waiting) | Should Be $true
+    }
+
+    It 'saves after every change and deletes the file when nothing is pinned any more' {
+        Add-Entries 'a', 'b'
+        Switch-ClipboardPin (Get-Entry 'a')
+        (Read-SavedPins) -join '|' | Should BeExactly 'a'
+        Switch-ClipboardPin (Get-Entry 'b')
+        (Read-SavedPins) -join '|' | Should BeExactly 'a|b'
+        Add-ClipboardEntry (New-FormattedEntry 'a' -Html '<i>a</i>')
+        (Read-SavedPins)[0].Html | Should BeExactly '<i>a</i>'
+        Remove-ClipboardEntry (Get-Entry 'b')
+        (Read-SavedPins) -join '|' | Should BeExactly 'a'
+        Test-Path -LiteralPath "$($State.PinnedFile).tmp" | Should Be $false
+        Switch-ClipboardPin (Get-Entry 'a')
+        Test-Path -LiteralPath $State.PinnedFile | Should Be $false
+    }
+
+    It 'finds a pinned entry again when its text is copied after the start' {
+        Add-Entries 'a'
+        Switch-ClipboardPin (Get-Entry 'a')
+        Restart-WithSavedPins
+        Add-Entries 'a'
+        $State.History.Count | Should Be 0
+        $State.Pinned -join '|' | Should BeExactly 'a'
+    }
+
+    It 'writes nothing without -KeepPinned' {
+        $State.PinnedFile = $null
+        Add-Entries 'a'
+        Switch-ClipboardPin (Get-Entry 'a')
+        @(Get-ChildItem -LiteralPath $TestDrive -Filter 'pinned*').Count | Should Be 0
+        Restore-PinnedList | Should BeNullOrEmpty
+        $State.Pinned.Count | Should Be 1
+    }
+
+    It 'encrypts the file for the Windows user, with its own entropy' {
+        Add-Entries 'secret text'
+        Switch-ClipboardPin (Get-Entry 'secret text')
+        $bytes = [System.IO.File]::ReadAllBytes($State.PinnedFile)
+        [System.Text.Encoding]::Unicode.GetString($bytes) | Should Not Match 'secret'
+        [System.Text.Encoding]::UTF8.GetString($bytes) | Should Not Match 'secret|psclip'
+        Add-Type -AssemblyName System.Security
+        $scope = [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+        { [System.Security.Cryptography.ProtectedData]::Unprotect($bytes, $null, $scope) } | Should Throw
+        $entropy = [System.Text.Encoding]::ASCII.GetBytes('psclip.pinned.v1')
+        [System.Security.Cryptography.ProtectedData]::Unprotect($bytes, $entropy, $scope).Length |
+            Should BeGreaterThan 0
+    }
+
+    It 'keeps a file it cannot read, says so and does not save in this run' {
+        [System.IO.File]::WriteAllBytes($State.PinnedFile, [byte[]](1..100))
+        Restart-WithSavedPins | Should Match 'Could not read the saved pinned entries \(pinned\.dat\): .+ delete it'
+        $State.Pinned.Count | Should Be 0
+        Add-Entries 'a'
+        Switch-ClipboardPin (Get-Entry 'a')
+        [System.IO.File]::ReadAllBytes((Join-Path $TestDrive 'pinned.dat')) -join ',' |
+            Should BeExactly ((1..100) -join ',')
+    }
+
+    It 'refuses damaged data instead of allocating what a damaged length claims' {
+        $data = [PsClip.PinnedStore]::Serialize([PsClip.ClipEntry[]]@([PsClip.ClipEntry]::new('text')))
+        # The text's length is at byte 39 - after the header (22 bytes), version, count, date and image
+        # flag - and its 8 bytes follow: cut off in the middle of them.
+        { [PsClip.PinnedStore]::Deserialize([byte[]]$data[0..46], 22) } | Should Throw 'incomplete or damaged'
+        $huge = [byte[]]$data.Clone()
+        [Array]::Copy([BitConverter]::GetBytes([int]::MaxValue), 0, $huge, 39, 4)
+        { [PsClip.PinnedStore]::Deserialize($huge, 22) } | Should Throw 'incomplete or damaged'
+        { [PsClip.PinnedStore]::Deserialize([byte[]](1..50), 22) } | Should Throw 'not a file of pinned entries'
+    }
+
+    It 'tells once when saving fails, not at every change - pinning itself still works' {
+        $State.PinnedFile = Join-Path $TestDrive 'missing folder\pinned.dat'
+        Add-Entries 'a', 'b'
+        Switch-ClipboardPin (Get-Entry 'a')
+        Switch-ClipboardPin (Get-Entry 'b')
+        Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It
+        $State.Pinned -join '|' | Should BeExactly 'a|b'
+    }
+
+    It 'keeps a separate file per instance' {
+        Get-PinnedFilePath 'C:\psclip' 'PsClipboardManager' | Should BeExactly 'C:\psclip\pinned.dat'
+        Get-PinnedFilePath 'C:\psclip' 'Test' | Should BeExactly 'C:\psclip\pinned-Test.dat'
+    }
+}
+
 Describe 'Format-MemorySize' {
     It 'shows megabytes below 1 GB and gigabytes above, with a point as decimal separator' {
         Format-MemorySize 100MB | Should BeExactly '100 MB'

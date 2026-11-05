@@ -41,6 +41,10 @@
 .PARAMETER KeepAwakeSeconds
     Passed on to ClipboardManager.ps1: idle seconds before "Keep awake" presses F15 (default 30).
 
+.PARAMETER KeepPinned
+    Passed on to ClipboardManager.ps1: keep the pinned entries when psclip exits (saved encrypted
+    to pinned.dat in this folder).
+
 .PARAMETER Force
     Restart a running psclip without asking.
 
@@ -97,6 +101,9 @@ param(
     [Parameter(ParameterSetName = 'Install')]
     [ValidateRange(1, 3600)]
     [int]$KeepAwakeSeconds,
+
+    [Parameter(ParameterSetName = 'Install')]
+    [switch]$KeepPinned,
 
     [Parameter(ParameterSetName = 'Install')]
     [switch]$Force,
@@ -165,7 +172,7 @@ function Get-ShortcutArguments {
     foreach ($name in 'Hotkey', 'MaxMemory', 'Theme', 'Size', 'OpenAt', 'KeepAwakeSeconds') {
         if ($Settings.ContainsKey($name)) { $arguments += "-$name", [string]$Settings[$name] }
     }
-    foreach ($name in 'Preview', 'KeepAwake') {
+    foreach ($name in 'Preview', 'KeepAwake', 'KeepPinned') {
         if ($Settings.ContainsKey($name) -and [bool]$Settings[$name]) { $arguments += "-$name" }
     }
 
@@ -227,7 +234,7 @@ function New-Shortcut {
         $shortcut.Arguments = $Arguments
         $shortcut.WorkingDirectory = $PSScriptRoot
         $shortcut.IconLocation = "$powershellExe,0"
-        $shortcut.Description = 'Clipboard history (in memory only)'
+        $shortcut.Description = 'Clipboard history'
         $shortcut.Save()
     }
     finally {
@@ -260,6 +267,11 @@ if ($Uninstall) {
             Remove-Item -LiteralPath $path
             Write-Host "Removed $path"
         }
+    }
+    $pinnedFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'pinned*.dat' -File)
+    if ($pinnedFiles.Count -gt 0) {
+        Write-Host ('Pinned entries saved by -KeepPinned are still in this folder (' +
+            (($pinnedFiles | ForEach-Object { $_.Name }) -join ', ') + '); they go with it when you delete it.')
     }
     return
 }
@@ -295,7 +307,7 @@ elseif (Test-Path -LiteralPath $autostartShortcut) {
 $runningId = Get-ManagerProcessId
 if ($runningId -ne 0) {
     $question = 'psclip is running. Restart it now so that the new settings apply? ' +
-        'Its history and pinned entries will be lost.'
+        'Its history will be lost, and its pinned entries too unless it runs with -KeepPinned.'
     if (-not ($Force -or (Confirm-Restart $question))) {
         Write-Host 'psclip keeps running with its current settings; the new ones apply the next time it starts.'
         return

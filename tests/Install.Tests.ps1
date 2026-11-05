@@ -70,12 +70,28 @@ Describe 'Get-ShortcutArguments' {
     It 'passes the settings on unchanged, also a hotkey ending in a backslash' {
         $line = Get-ShortcutArguments @{
             Hotkey = 'Ctrl+\'; Theme = 'Light'; MaxMemory = '500MB'; OpenAt = 'TextCursor'
-            Preview = [switch]$true; KeepAwake = [switch]$true
+            Preview = [switch]$true; KeepAwake = [switch]$true; KeepPinned = [switch]$true
         }
         $parsed = [ArgvParser]::Split('conhost.exe ' + $line)
         $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
-        $afterFile -join ' ' |
-            Should BeExactly '-Hotkey Ctrl+\ -MaxMemory 500MB -Theme Light -OpenAt TextCursor -Preview -KeepAwake'
+        $afterFile -join ' ' | Should BeExactly ('-Hotkey Ctrl+\ -MaxMemory 500MB -Theme Light -OpenAt TextCursor ' +
+            '-Preview -KeepAwake -KeepPinned')
+    }
+
+    It 'passes only parameters that ClipboardManager.ps1 has' {
+        # An unknown parameter would stop psclip at logon without any message (headless).
+        $line = Get-ShortcutArguments @{
+            Hotkey = 'Ctrl+Alt+V'; MaxMemory = '1GB'; Theme = 'Light'; Size = 'L'; OpenAt = 'Mouse'
+            KeepAwakeSeconds = 10; Preview = [switch]$true; KeepAwake = [switch]$true; KeepPinned = [switch]$true
+        }
+        $parsed = [ArgvParser]::Split('conhost.exe ' + $line)
+        $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
+        $names = @($afterFile | Where-Object { $_.StartsWith('-') } | ForEach-Object { $_.Substring(1) })
+        $names.Count | Should Be 9
+        $parameters = (Get-Command $managerScript).Parameters
+        foreach ($name in $names) {
+            "$name $($parameters.ContainsKey($name))" | Should BeExactly "$name True"
+        }
     }
 
     It 'accepts the parameter dictionary of Install.ps1 ($PSBoundParameters), not just hashtables' {

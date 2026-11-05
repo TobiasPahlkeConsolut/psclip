@@ -6,8 +6,8 @@
     Records every text that is copied to the clipboard - with its formatting (HTML, RTF) - and
     every image (e.g. screenshots), and keeps the most recent entries in memory. Text in images
     is recognized in the background (Windows' built-in OCR), so the filter finds images by their
-    content too. Nothing is ever written to disk: the history (pinned entries included) is gone
-    when the script exits.
+    content too. Nothing is written to disk: the history is gone when the script exits - and so
+    are the pinned entries, unless -KeepPinned saves them.
 
     Press the hotkey (see -Hotkey) to open the history at the mouse pointer (or the text cursor,
     see -OpenAt):
@@ -80,6 +80,12 @@
 .PARAMETER KeepAwakeSeconds
     Seconds without mouse or keyboard input after which "Keep awake" presses the F15 key.
 
+.PARAMETER KeepPinned
+    Keep the pinned entries when psclip exits: they are saved to the file pinned.dat next to this
+    script whenever they change, and loaded at the next start. The file is encrypted for your
+    Windows account (DPAPI), so other users cannot read it, nor can anyone on another computer.
+    The rest of the history is never saved. Delete the file to remove the saved entries.
+
 .PARAMETER InstanceName
     Name of the instance's mutex and hidden window. Only needed to run a second, independent
     instance next to the normal one, as the end-to-end test does.
@@ -131,6 +137,8 @@ param(
     [ValidateRange(1, 3600)]
     [int]$KeepAwakeSeconds = 30,
 
+    [switch]$KeepPinned,
+
     [ValidatePattern('^[\w.-]{1,64}$')]
     [string]$InstanceName = 'PsClipboardManager',
 
@@ -154,10 +162,11 @@ Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 
 #region Native helpers (C#)
 
-# src\*.cs: Win32 calls, the hidden clipboard window, history entries, menu colors - compiled together.
+# src\*.cs: Win32 calls, the hidden clipboard window, history entries, menu colors, text cursor, the
+# pinned entries file - compiled together. System.Security: DPAPI for that file.
 if (-not ('PsClip.Native' -as [type])) {
     $csFiles = (Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'src') -Filter '*.cs').FullName
-    Add-Type -Path $csFiles -ReferencedAssemblies System.Windows.Forms, System.Drawing, Accessibility
+    Add-Type -Path $csFiles -ReferencedAssemblies System.Windows.Forms, System.Drawing, System.Security, Accessibility
 }
 
 #endregion
@@ -241,6 +250,7 @@ $hotkeySpec = ConvertFrom-HotkeyText $Hotkey   # fails early on an invalid hotke
 if ($PSBoundParameters.ContainsKey('MaxItems') -or $PSBoundParameters.ContainsKey('MaxImages')) {
     Write-Verbose '-MaxItems and -MaxImages are ignored: the history is limited by -MaxMemory now.'
 }
+$pinnedFile = if ($KeepPinned) { Get-PinnedFilePath $PSScriptRoot $InstanceName } else { $null }
 
 # One instance per user session (per InstanceName)
 $mutex = [System.Threading.Mutex]::new($false, "Local\$InstanceName")
@@ -259,6 +269,8 @@ if (-not $ownsMutex) {
 $State = @{
     History              = [List[PsClip.ClipEntry]]::new()   # unpinned entries, newest first
     Pinned               = [List[PsClip.ClipEntry]]::new()   # pinned entries, in pin order
+    PinnedFile           = $pinnedFile           # -KeepPinned: where they are saved; $null = not saved
+    PinnedSaveFailed     = $false                # saving failed (reported once, not at every change)
     Filtered             = [List[PsClip.ClipEntry]]::new()   # entries currently shown in the popup
     FilteredPinnedCount  = 0
     FoundCount           = 0                     # entries matching the filter (more than shown: MaxListItems)
@@ -294,8 +306,15 @@ try {
     Start-ClipboardListener
     Initialize-KeepAwake
     Initialize-Ocr
+    # After Initialize-Ocr (queues images whose text is not recognized yet), before the clipboard is
+    # read: a copied text equal to a pinned entry must find it.
+    $warnings = @(Restore-PinnedList)
 
     $hotkeyOk = Register-Hotkey $hotkeySpec
+    if (-not $hotkeyOk) {
+        $warnings += "The hotkey $($State.HotkeyText) is already used by another program. " +
+            "Right-click the tray icon and choose 'Change hotkey'."
+    }
     try {
         $initial = Read-ClipboardEntry
         if ($null -ne $initial) { Add-ClipboardEntry $initial }
@@ -304,14 +323,8 @@ try {
         Write-Verbose "Could not read the initial clipboard content: $($_.Exception.Message)"
     }
     Update-TrayText
-    $Ui.Tray.Visible = $true
-
-    if (-not $hotkeyOk) {
-        $Ui.Tray.ShowBalloonTip(8000, 'Clipboard history',
-            "The hotkey $($State.HotkeyText) is already used by another program. " +
-            "Right-click the tray icon and choose 'Change hotkey'.",
-            'Warning')
-    }
+    $Ui.Tray.Visible = $true   # before the warnings: an invisible tray icon shows no message
+    if ($warnings.Count -gt 0) { Show-TrayWarning ($warnings -join "`n") }
 
     Write-Verbose "Running (PID $PID). Exit via the tray icon menu."
     [Application]::Run($Ui.AppContext)
