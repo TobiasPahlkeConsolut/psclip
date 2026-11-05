@@ -83,10 +83,20 @@ Describe 'Update-PopupList' {
         Update-PopupList
         @($Ui.List.Items) -join '|' | Should BeExactly 'one|three|two'
     }
+
+    It 'does not show the preview of the selected entry twice (selecting it already did)' {
+        Mock Update-Preview {}
+        $State.PreviewEntry = Get-Entry 'one'   # what SelectedIndexChanged has shown
+        Update-PopupList
+        Assert-MockCalled Update-Preview -Scope It -Exactly 0
+        $State.PreviewEntry = $null
+        Update-PopupList
+        Assert-MockCalled Update-Preview -Scope It -Exactly 1
+    }
 }
 
 Describe 'Hide-Popup' {
-    It 'clears the list so that no previews stay in the hidden window' {
+    It 'clears the list, the preview and the filter text so that nothing stays in the hidden window' {
         Reset-TestState
         $form = [pscustomobject]@{ Visible = $true; Hides = 0 }
         $form | Add-Member -MemberType ScriptMethod -Name Hide -Value {
@@ -94,6 +104,7 @@ Describe 'Hide-Popup' {
             $this.Hides++
         }
         $script:Ui.Form = $form
+        $script:Ui.Search = [pscustomobject]@{ Text = 'secret filter' }
         $script:Ui.List = [System.Windows.Forms.ListBox]::new()
         $script:Ui.PreviewInfo = [pscustomobject]@{ Text = '12 characters' }
         $script:Ui.PreviewText = [pscustomobject]@{ Text = 'secret text' }
@@ -104,6 +115,7 @@ Describe 'Hide-Popup' {
         Hide-Popup
 
         $form.Hides | Should Be 1
+        $Ui.Search.Text | Should BeExactly ''
         $Ui.List.Items.Count | Should Be 0
         $Ui.PreviewText.Text | Should BeExactly ''
         $State.Filtered.Count | Should Be 0

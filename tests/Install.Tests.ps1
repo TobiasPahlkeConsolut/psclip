@@ -86,6 +86,13 @@ Describe 'Get-ShortcutArguments' {
         $afterFile -join ' ' | Should BeExactly '-Size L -KeepAwake'
     }
 
+    It 'keeps working with shortcuts of older versions (-MaxItems, -MaxImages)' {
+        # An unknown parameter would stop psclip at logon without any message (headless).
+        $parameters = (Get-Command $managerScript).Parameters
+        $parameters.ContainsKey('MaxItems') | Should Be $true
+        $parameters.ContainsKey('MaxImages') | Should Be $true
+    }
+
     It 'leaves out settings that were not given' {
         Get-ShortcutArguments @{ Size = 'L' } | Should Not Match '-Theme|-Hotkey|-KeepAwake'
     }

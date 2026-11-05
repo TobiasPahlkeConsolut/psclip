@@ -57,18 +57,29 @@ function Step-Ocr {
     # recognize the text - so nothing on the UI thread waits for it.
     $job = $State.OcrJob
     if ($null -eq $job) {
-        if ($State.OcrQueue.Count -eq 0) {
+        # Images removed meanwhile (by hand, "Clear history", the memory limit) are skipped.
+        $entry = $null
+        while ($null -eq $entry -and $State.OcrQueue.Count -gt 0) {
+            $next = $State.OcrQueue.Dequeue()
+            if ($State.History.Contains($next) -or $State.Pinned.Contains($next)) { $entry = $next }
+        }
+        if ($null -eq $entry) {
             $Ui.OcrTimer.Enabled = $false
             return
         }
-        $entry = $State.OcrQueue.Dequeue()
-        $png = [System.IO.MemoryStream]::new($entry.Png)
-        $stream = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($png)
-        $decoderType = [Windows.Graphics.Imaging.BitmapDecoder]
-        $State.OcrJob = @{
-            Entry = $entry
-            Stage = 'Decode'
-            Task  = Start-WinRtTask ($decoderType::CreateAsync($stream)) $decoderType
+        try {
+            $png = [System.IO.MemoryStream]::new($entry.Png)
+            $stream = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($png)
+            $decoderType = [Windows.Graphics.Imaging.BitmapDecoder]
+            $State.OcrJob = @{
+                Entry = $entry
+                Stage = 'Decode'
+                Task  = Start-WinRtTask ($decoderType::CreateAsync($stream)) $decoderType
+            }
+        }
+        catch {
+            Write-Verbose "Text recognition could not start for an image: $($_.Exception.Message)"
+            $entry.OcrText = ''   # not "reading text..." forever
         }
         return
     }

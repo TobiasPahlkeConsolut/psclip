@@ -175,7 +175,7 @@ function New-PopupWindow {
     [PsClip.Native]::SetCueBanner($search.Handle, 'Type to filter...')
 
     # Event handlers run after this function has returned: use $Ui / $State, not local variables.
-    $search.add_TextChanged({ Update-PopupList })
+    $search.add_TextChanged({ if ($Ui.Form.Visible) { Update-PopupList } })   # Hide-Popup empties it
     $list.add_SelectedIndexChanged({ Update-Preview })
     $form.add_Resize({ if ($Ui.Form.Visible) { Update-StatusText } })
     $preview.add_Resize({ Update-PreviewTextHeight })

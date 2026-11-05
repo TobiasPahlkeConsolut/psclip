@@ -51,6 +51,25 @@ Describe 'Text in images (OCR)' {
         $State.OcrQueue.Count | Should Be 0
     }
 
+    It 'skips queued images that were removed meanwhile, then stops the timer' {
+        $script:Ui.OcrTimer = [pscustomobject]@{ Enabled = $true }
+        $State.OcrQueue.Enqueue((New-ImageEntry 'Red'))     # never added, like a removed one
+        $State.OcrQueue.Enqueue((New-ImageEntry 'Green'))
+        Step-Ocr
+        $State.OcrQueue.Count | Should Be 0
+        $State.OcrJob | Should BeNullOrEmpty
+        $Ui.OcrTimer.Enabled | Should Be $false
+    }
+
+    It 'gives up on an image whose recognition failed (no text instead of "reading text...")' {
+        $entry = New-ImageEntry
+        $failed = [System.Threading.Tasks.Task]::FromException([InvalidOperationException]::new('test'))
+        $State.OcrJob = @{ Entry = $entry; Stage = 'Decode'; Task = $failed }
+        Step-Ocr
+        $entry.OcrText | Should BeExactly ''
+        $State.OcrJob | Should BeNullOrEmpty
+    }
+
     It 'recognizes the text in an image with Windows OCR' {
         Initialize-Ocr
         if (-not $Ui.ContainsKey('OcrEngine')) {
@@ -67,7 +86,7 @@ Describe 'Text in images (OCR)' {
             $graphics.Dispose()
             $entry = [PsClip.ClipEntry]::FromImage($bitmap, 22)
 
-            Start-ImageOcr $entry
+            Add-ClipboardEntry $entry   # queues it for recognition; only images in the history are recognized
             $watch = [Diagnostics.Stopwatch]::StartNew()
             while ($null -eq $entry.OcrText -and $watch.ElapsedMilliseconds -lt 10000) {
                 Step-Ocr

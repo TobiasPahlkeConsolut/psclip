@@ -25,12 +25,25 @@ function Read-ClipboardEntry {
         Write-Verbose 'Ignored clipboard content excluded from clipboard history.'
         return $null
     }
-    # Text wins over an image: e.g. Excel offers copied cells as text and as a picture.
-    if (-not $Data.GetDataPresent([DataFormats]::UnicodeText)) {
+    # autoConvert $false for text and bitmap: with conversion, WinForms falls back to the custom formats
+    # "System.String" and "System.Drawing.Bitmap" and deserializes them (BinaryFormatter). Windows itself
+    # offers the standard formats (e.g. Unicode text for ANSI text).
+    $text = $null
+    if ($Data.GetDataPresent([DataFormats]::UnicodeText, $false)) {
+        $text = $Data.GetData([DataFormats]::UnicodeText, $false) -as [string]
+    }
+    # Text wins over an image (e.g. Excel offers copied cells as text and as a picture) - unless it is blank.
+    if ([string]::IsNullOrWhiteSpace($text)) {
         return Read-ClipboardImage $Data
     }
+    if ($text.Length -gt $MaxEntryLength) {
+        # Before asking for the formatting: the source app renders it only on request, which can take
+        # long (e.g. a large Excel range) - wasted for a text that is not recorded.
+        Write-Verbose "Skipped entry with $($text.Length) chars (MaxEntryLength $MaxEntryLength)."
+        return $null
+    }
 
-    $entry = [PsClip.ClipEntry]::new([string]$Data.GetData([DataFormats]::UnicodeText))
+    $entry = [PsClip.ClipEntry]::new($text)
     # WinForms reads HTML and RTF as plain strings (no deserialization). Formatting larger than
     # MaxEntryLength is dropped; the text is kept.
     foreach ($format in 'Html', 'Rtf') {
@@ -57,8 +70,8 @@ function Read-ClipboardImage {
             $image = $null   # not a valid PNG - try the bitmap
         }
     }
-    if ($null -eq $image -and $Data.GetDataPresent([DataFormats]::Bitmap)) {
-        $image = $Data.GetData([DataFormats]::Bitmap) -as [Image]
+    if ($null -eq $image -and $Data.GetDataPresent([DataFormats]::Bitmap, $false)) {
+        $image = $Data.GetData([DataFormats]::Bitmap, $false) -as [Image]
     }
     if ($null -eq $image) { return $null }
 
@@ -67,11 +80,18 @@ function Read-ClipboardImage {
             Write-Verbose "Skipped image of $($image.Width) x $($image.Height) pixels."
             return $null
         }
-        return [PsClip.ClipEntry]::FromImage($image, $Ui.ThumbnailHeight)
+        $entry = [PsClip.ClipEntry]::FromImage($image, $Ui.ThumbnailHeight)
     }
     finally {
         $image.Dispose()
     }
+    # Also for an image from the bitmap: as PNG it can be larger than the limit for the PNG format.
+    if ($entry.Png.Length -gt $MaxImageBytes) {
+        Write-Verbose "Skipped image of $(Format-MemorySize $entry.Png.Length) as PNG."
+        $entry.Thumbnail.Dispose()
+        return $null
+    }
+    $entry
 }
 
 function Receive-ClipboardChange {
@@ -107,6 +127,12 @@ function Add-ClipboardEntry {
             Write-Verbose "Skipped entry with $($Entry.Text.Length) chars (MaxEntryLength $MaxEntryLength)."
             return
         }
+    }
+    # One entry must not push most of the history out: more than half the memory limit is not recorded.
+    $limit = $MemoryLimits[$State.MemoryLimit]
+    if ($Entry.Size -gt $limit / 2) {
+        Write-Verbose "Skipped entry of $(Format-MemorySize $Entry.Size): more than half the memory limit."
+        return
     }
 
     # A re-copied text replaces the old entry (the newer formatting wins). A re-copied image is
@@ -184,7 +210,8 @@ function New-ClipboardData {
     $data = [DataObject]::new()
     if ($Entry.IsImage) {
         # The bitmap for every program, plus the PNG for those that prefer it (keeps transparency).
-        $data.SetImage($Entry.ToBitmap())
+        # Not SetImage: it would also offer a serialized copy of the bitmap ("System.Drawing.Bitmap").
+        $data.SetData([DataFormats]::Bitmap, $false, $Entry.ToBitmap())
         $data.SetData('PNG', $false, [System.IO.MemoryStream]::new($Entry.Png))
         return $data
     }
@@ -199,8 +226,15 @@ function New-ClipboardData {
 function Set-ClipboardEntry {
     param([PsClip.ClipEntry]$Entry, [switch]$PlainText)
 
-    [Clipboard]::SetDataObject((New-ClipboardData $Entry -PlainText:$PlainText), $true, 10, 100)
-    $State.OwnClipboardSequence = [PsClip.Native]::GetClipboardSequenceNumber()
+    $data = New-ClipboardData $Entry -PlainText:$PlainText
+    try {
+        [Clipboard]::SetDataObject($data, $true, 10, 100)
+        $State.OwnClipboardSequence = [PsClip.Native]::GetClipboardSequenceNumber()
+    }
+    finally {
+        # copy = $true: the clipboard holds its own copy now (or none), so the bitmap can go.
+        if ($Entry.IsImage) { $data.GetData([DataFormats]::Bitmap, $false).Dispose() }
+    }
 }
 
 function Limit-ClipboardHistory {

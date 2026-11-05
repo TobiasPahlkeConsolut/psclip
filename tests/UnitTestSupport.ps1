@@ -10,6 +10,44 @@
 # Load the functions without starting the app (see the guard at the start of "#region Main").
 . (Join-Path $PSScriptRoot '..\ClipboardManager.ps1')
 
+if (-not ('PsClipTest.ComForwarder' -as [type])) {
+    Add-Type -TypeDefinition @'
+using System.Runtime.InteropServices.ComTypes;
+
+namespace PsClipTest
+{
+    // A plain COM IDataObject in front of a DataObject: WinForms then reads it through COM (an
+    // OleConverter) like the real clipboard, with that path's conversions and fallbacks.
+    public class ComForwarder : IDataObject
+    {
+        readonly IDataObject inner;
+        public ComForwarder(IDataObject inner) { this.inner = inner; }
+        public int DAdvise(ref FORMATETC f, ADVF a, IAdviseSink s, out int c)
+        {
+            return inner.DAdvise(ref f, a, s, out c);
+        }
+        public void DUnadvise(int c) { inner.DUnadvise(c); }
+        public int EnumDAdvise(out IEnumSTATDATA e) { return inner.EnumDAdvise(out e); }
+        public IEnumFORMATETC EnumFormatEtc(DATADIR d) { return inner.EnumFormatEtc(d); }
+        public int GetCanonicalFormatEtc(ref FORMATETC i, out FORMATETC o)
+        {
+            return inner.GetCanonicalFormatEtc(ref i, out o);
+        }
+        public void GetData(ref FORMATETC f, out STGMEDIUM m) { inner.GetData(ref f, out m); }
+        public void GetDataHere(ref FORMATETC f, ref STGMEDIUM m) { inner.GetDataHere(ref f, ref m); }
+        public int QueryGetData(ref FORMATETC f) { return inner.QueryGetData(ref f); }
+        public void SetData(ref FORMATETC f, ref STGMEDIUM m, bool r) { inner.SetData(ref f, ref m, r); }
+    }
+}
+'@
+}
+
+function New-OleData {
+    # Clipboard data as the real clipboard delivers it (through COM), see ComForwarder.
+    param([System.Windows.Forms.DataObject]$Inner)
+    [System.Windows.Forms.DataObject]::new([PsClipTest.ComForwarder]::new($Inner))
+}
+
 # Some tests depend on the keyboard layout: the o-umlaut is on the Oemtilde key on German layouts.
 $germanLayout = [PsClip.Native]::VirtualKeyOf([char]0xF6) -eq 0xC0
 $upperUmlaut = [string][char]0xD6
@@ -32,6 +70,7 @@ function Reset-TestState {
         PopupSize           = 'M'
         PreviewVisible      = $false
         PreviewTextShare    = 0.3
+        PreviewEntry        = $null
         KeepAwake           = $false
         OcrQueue            = [System.Collections.Generic.Queue[PsClip.ClipEntry]]::new()
         OcrJob              = $null
@@ -49,6 +88,7 @@ function Reset-TestState {
     $script:MemoryLimits = [ordered]@{ '100MB' = 100MB; '500MB' = 500MB; '1GB' = 1GB }
     $script:MaxListItems = 1000
     $script:MaxEntryLength = 1000000
+    $script:MaxImageBytes = 50MB
     $script:KeepAwakeSeconds = 30
 }
 

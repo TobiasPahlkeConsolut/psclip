@@ -116,6 +116,10 @@ See [README.md](README.md) for features and usage.
 - Clipboard reading: custom formats (anything that is not text, HTML, RTF, bitmap, ...) must only be read with
   `PsClip.Native.ReadFormatBytes`. `DataObject.GetData()` deserializes them with BinaryFormatter, i.e. runs code
   chosen by whoever put them on the clipboard (another program, an RDP session). `GetDataPresent()` is safe.
+  Read text and bitmap with `autoConvert` `$false` too: with conversion, WinForms falls back to the custom formats
+  "System.String" / "System.Drawing.Bitmap" (BinaryFormatter). Only the real clipboard's COM path shows this - the
+  unit tests use `New-OleData` (a COM forwarder) for it. Images go back on the clipboard with
+  `SetData(Bitmap, $false, ...)`, not `SetImage` (which adds a serialized copy).
 - The popup is resized to the configured size (`$PopupSizes`, `-Size`) every time it opens (`Reset-PopupSize`);
   manual resizing is intentionally temporary. The preview (`F3`, `$Ui.Preview`) is a bottom-docked panel; showing
   it makes the popup taller by its height (`Switch-Preview`, `Move-PopupIntoScreen`). Each opening resets it:
@@ -194,5 +198,5 @@ See [README.md](README.md) for features and usage.
 
 ## Git
 
-- Pushing to GitHub from the consolut network needs the Windows certificate store: this clone has
+- Pushing to GitHub from a network with TLS inspection needs the Windows certificate store: this clone has
   `http.sslBackend=schannel` set locally (otherwise: "unable to get local issuer certificate").

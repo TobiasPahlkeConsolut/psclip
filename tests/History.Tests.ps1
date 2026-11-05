@@ -80,6 +80,36 @@ Describe 'Read-ClipboardEntry' {
         ($bytes -is [byte[]]) | Should Be $true
         (Read-ClipboardEntry $data).Text | Should BeExactly 'text'
     }
+
+    It 'skips too long text without reading its formatting' {
+        $script:MaxEntryLength = 10
+        $data = New-Data ('x' * 11)
+        $data.SetData([System.Windows.Forms.DataFormats]::Html, '<b>x</b>')
+        Read-ClipboardEntry $data | Should BeNullOrEmpty
+    }
+
+    It 'takes the image when the text next to it is blank' {
+        $data = New-Data "`r`n "
+        $data.SetImage((New-TestImage 30 10))
+        (Read-ClipboardEntry $data).Width | Should Be 30
+    }
+
+    It 'reads text and images through COM, like from the real clipboard' {
+        (Read-ClipboardEntry (New-OleData (New-Data 'from COM'))).Text | Should BeExactly 'from COM'
+        $image = New-Data
+        $image.SetImage((New-TestImage 30 10))
+        (Read-ClipboardEntry (New-OleData $image)).Width | Should Be 30
+    }
+
+    It 'never deserializes the custom formats System.String and System.Drawing.Bitmap' {
+        # Through COM, WinForms falls back to these when asked for text or a bitmap with conversion.
+        $string = New-Data
+        $string.SetData('System.String', $false, 'serialized string')
+        Read-ClipboardEntry (New-OleData $string) | Should BeNullOrEmpty
+        $bitmap = New-Data
+        $bitmap.SetData('System.Drawing.Bitmap', $false, [System.Drawing.Bitmap]::new(7, 5))
+        Read-ClipboardEntry (New-OleData $bitmap) | Should BeNullOrEmpty
+    }
 }
 
 Describe 'Image entries' {
@@ -141,20 +171,31 @@ Describe 'Image entries' {
     }
 
     It 'are dropped like texts, oldest first' {
-        $image = New-ImageEntry 'Red'
-        Set-TestMemoryLimit ($image.Size + 2 * 102)   # the image and two one-character texts
-        Add-ClipboardEntry $image
+        $red = New-ImageEntry 'Red'
+        $green = New-ImageEntry 'Green'
+        Set-TestMemoryLimit ($red.Size + $green.Size + 300)   # both images and two one-character texts
+        Add-ClipboardEntry $red
+        Add-ClipboardEntry $green
         Add-Entries 'a', 'b'
-        $State.History.Count | Should Be 3
+        $State.History.Count | Should Be 4
         Add-Entries 'c'
-        $State.History -join '|' | Should BeExactly 'c|b|a'
+        $State.History -join '|' | Should BeExactly 'c|b|a|Image 40 x 20'
+        [object]::ReferenceEquals($State.History[3], $green) | Should Be $true
     }
 
-    It 'go back on the clipboard as bitmap and PNG' {
+    It 'are skipped when their PNG is larger than MaxImageBytes, also from the bitmap' {
+        $script:MaxImageBytes = 50
+        $data = [System.Windows.Forms.DataObject]::new()
+        $data.SetImage((New-TestImage 30 10))
+        Read-ClipboardEntry $data | Should BeNullOrEmpty
+    }
+
+    It 'go back on the clipboard as bitmap and PNG, without a serialized copy' {
         $data = New-ClipboardData (New-ImageEntry)
         $data.GetImage().Width | Should Be 40
         $data.GetDataPresent('PNG') | Should Be $true
         $data.GetDataPresent([System.Windows.Forms.DataFormats]::UnicodeText) | Should Be $false
+        $data.GetFormats($false) -join ', ' | Should Not Match 'System\.Drawing\.Bitmap'
     }
 
     It 'show their size in the list and are found by the word image' {
@@ -256,13 +297,22 @@ Describe 'Clipboard history' {
     }
 
     It 'keeps the newest entry even when pinned entries use up the memory limit' {
-        Set-TestMemoryLimit 150
-        Add-Entries 'pinned'
-        Switch-ClipboardPin (Get-Entry 'pinned')
+        Set-TestMemoryLimit 250
+        foreach ($text in 'p1', 'p2', 'p3') {   # 3 x 104 bytes pinned
+            Add-Entries $text
+            Switch-ClipboardPin (Get-Entry $text)
+        }
         Add-Entries 'a'
         $State.History -join '|' | Should BeExactly 'a'
         Add-Entries 'b'
         $State.History -join '|' | Should BeExactly 'b'
+        $State.Pinned.Count | Should Be 3
+    }
+
+    It 'skips an entry larger than half the memory limit instead of dropping most of the history' {
+        Set-TestMemoryLimit 1000
+        Add-Entries 'a', 'b', ('x' * 250)   # 600 bytes
+        $State.History -join '|' | Should BeExactly 'b|a'
     }
 
     It 'drops entries right away when the memory limit is lowered' {

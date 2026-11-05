@@ -29,12 +29,8 @@ function Show-Popup {
     $Ui.Preview.Height = [int]($PreviewHeight * $Ui.Scale)
     $State.PreviewTextShare = $PreviewTextShare
     Reset-PopupSize
-    if ($Ui.Search.Text) {
-        $Ui.Search.Text = ''   # TextChanged refreshes the list
-    }
-    else {
-        Update-PopupList
-    }
+    $Ui.Search.Text = ''   # normally empty already (Hide-Popup); no refresh while the form is hidden
+    Update-PopupList
 
     $form = $Ui.Form
     $cursor = [Cursor]::Position
@@ -108,6 +104,7 @@ function Update-Preview {
         $Ui.PreviewTextSplitter.Visible = $false
         $Ui.PreviewImage.Visible = $false
     }
+    $State.PreviewEntry = $entry
 }
 
 function Get-PreviewTextSpace {
@@ -129,6 +126,7 @@ function Save-PreviewTextShare {
 }
 
 function Clear-Preview {
+    $State.PreviewEntry = $null
     $Ui.PreviewInfo.Text = ''
     $Ui.PreviewText.Text = ''
     $image = $Ui.PreviewImage.Image
@@ -180,8 +178,10 @@ function Show-PopupLater {
 function Hide-Popup {
     if ($Ui.Form.Visible) { $Ui.Form.Hide() }
 
-    # Do not leave previews of the history in the hidden list and preview: other programs could
-    # read them.
+    # Do not leave previews of the history in the hidden list and preview, nor the filter text
+    # (perhaps part of a password): other programs could read them. The form is hidden already, so
+    # emptying the filter box does not refill the list.
+    $Ui.Search.Text = ''
     $Ui.List.Items.Clear()
     Clear-Preview
     $State.Filtered = [List[PsClip.ClipEntry]]::new()
@@ -230,7 +230,9 @@ function Update-PopupList {
     }
 
     Update-StatusText
-    Update-Preview
+    # Selecting the row usually updated the preview already (SelectedIndexChanged): decoding an image
+    # twice per keystroke would slow typing down.
+    if (-not [object]::ReferenceEquals($State.PreviewEntry, (Get-SelectedEntry))) { Update-Preview }
 }
 
 function Update-StatusText {

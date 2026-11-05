@@ -123,7 +123,15 @@ param(
     [int]$KeepAwakeSeconds = 30,
 
     [ValidatePattern('^[\w.-]{1,64}$')]
-    [string]$InstanceName = 'PsClipboardManager'
+    [string]$InstanceName = 'PsClipboardManager',
+
+    # Replaced by -MaxMemory and ignored, but still accepted: shortcuts made by older versions of
+    # Install.ps1 pass them, and an unknown parameter would stop psclip from starting (invisibly).
+    [Parameter(DontShow)]
+    [int]$MaxItems,
+
+    [Parameter(DontShow)]
+    [int]$MaxImages
 )
 
 Set-StrictMode -Version 2.0
@@ -221,6 +229,9 @@ $LineBreakMark = [PsClip.ClipEntry]::LineBreakMark   # shown instead of line bre
 if ($MyInvocation.InvocationName -eq '.') { return }
 
 $hotkeySpec = ConvertFrom-HotkeyText $Hotkey   # fails early on an invalid hotkey
+if ($PSBoundParameters.ContainsKey('MaxItems') -or $PSBoundParameters.ContainsKey('MaxImages')) {
+    Write-Verbose '-MaxItems and -MaxImages are ignored: the history is limited by -MaxMemory now.'
+}
 
 # One instance per user session (per InstanceName)
 $mutex = [System.Threading.Mutex]::new($false, "Local\$InstanceName")
@@ -253,6 +264,7 @@ $State = @{
     PreviewVisible       = $Preview.IsPresent    # F3 switches it while the popup is open
     PreviewDefault       = $Preview.IsPresent    # how the popup opens
     PreviewTextShare     = $PreviewTextShare     # text below an image; the bar between them changes it
+    PreviewEntry         = $null                 # the entry the preview shows
     KeepAwake            = $false                # the tray menu switches it
     OcrQueue             = [Queue[PsClip.ClipEntry]]::new()   # images waiting for text recognition
     OcrJob               = $null                 # the recognition in progress
