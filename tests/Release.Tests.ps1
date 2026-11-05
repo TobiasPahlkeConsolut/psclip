@@ -16,11 +16,12 @@ Describe 'Version' {
         $version | Should Match '^\d+\.\d+\.\d+$'
     }
 
-    It 'is the same in the help (.NOTES) and the newest CHANGELOG.md section' {
+    It 'is the same in the help (.NOTES) and the newest released CHANGELOG.md section' {
         $help = [IO.File]::ReadAllText((Join-Path $repository 'ClipboardManager.ps1'))
         $help | Should Match "(?m)^    psclip $([regex]::Escape($version)) - "
         $changelog = [IO.File]::ReadAllLines((Join-Path $repository 'CHANGELOG.md'))
-        $newest = @($changelog | Where-Object { $_ -like '## *' })[0]
+        # "## Unreleased" collects the changes for the next version
+        $newest = @($changelog | Where-Object { $_ -like '## *' -and $_ -ne '## Unreleased' })[0]
         $newest | Should Match "^## $([regex]::Escape($version)) - \d{4}-\d{2}-\d{2}$"
     }
 }

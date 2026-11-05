@@ -247,8 +247,9 @@ defaults stay minimal (100 MB, mouse pointer, nothing saved). Keep README "Optio
 
 Version numbers are `major.minor.patch`. For a release:
 
-1. Set the version in `ClipboardManager.ps1` (`$PsClipVersion` and the first line of `.NOTES`) and add a section
-   `## <version> - <date>` at the top of `CHANGELOG.md` - `tests/Release.Tests.ps1` checks that all three match.
+1. Set the version in `ClipboardManager.ps1` (`$PsClipVersion` and the first line of `.NOTES`) and rename
+   `## Unreleased` at the top of `CHANGELOG.md` to `## <version> - <date>` - `tests/Release.Tests.ps1` checks that
+   all three match. Between releases, note user-visible changes under `## Unreleased`.
 2. Unit tests, end-to-end test in both themes (ask the owner first, see above), screenshots if the look changed.
 3. `.\tools\New-ReleaseZip.ps1` -> `dist\psclip-<version>.zip` (one `psclip` folder: app, installer, `src`, `docs`,
    README, CHANGELOG, LICENSE; extracting it over an older one updates psclip and keeps `pinned.dat`).

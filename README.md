@@ -45,18 +45,22 @@ The history lives in memory only and is gone when the script exits; only pinned 
 then in a PowerShell window in your Downloads folder:
 
 ```powershell
-Expand-Archive .\psclip-1.0.0.zip -DestinationPath $HOME\Documents   # creates Documents\psclip
-cd $HOME\Documents\psclip
+Expand-Archive .\psclip-1.0.0.zip -DestinationPath $env:LOCALAPPDATA\Programs   # creates ...\Programs\psclip
+cd $env:LOCALAPPDATA\Programs\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
 
 **Or with git:**
 
 ```powershell
-git clone https://github.com/TobiasPahlkeConsolut/psclip.git
-cd psclip
+git clone https://github.com/TobiasPahlkeConsolut/psclip.git $env:LOCALAPPDATA\Programs\psclip
+cd $env:LOCALAPPDATA\Programs\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
+
+`%LOCALAPPDATA%\Programs` is Windows' folder for programs installed per user: it belongs to your account only and is
+never synced. Avoid Documents or the Desktop - OneDrive often syncs them, and the saved pinned entries (`pinned.dat`)
+live in psclip's folder and can only be read on the computer that saved them.
 
 **Updating:** extract the new ZIP over the old `psclip` folder (or `git pull`) - your saved pinned entries
 (`pinned.dat`) stay - and run `Install.ps1` again with your settings; it restarts psclip. What changed is in

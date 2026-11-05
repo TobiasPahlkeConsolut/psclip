@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- README: install to `%LOCALAPPDATA%\Programs\psclip` instead of Documents, which OneDrive often syncs
+
 ## 1.0.0 - 2026-11-05
 
 The first release. psclip is a small clipboard history for Windows: a PowerShell script, nothing to install, no admin
