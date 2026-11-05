@@ -239,10 +239,8 @@ you are using keeps running - it just records the test's clipboard entries (they
 
 `.\tests\New-DocsScreenshots.ps1` takes the screenshots in `docs\` the same way, with sample content.
 
-## Internal use
+## License
 
-© 2026 consolut. All rights reserved.
-
-psclip is intended solely for internal use by consolut employees. It must not be distributed, published or made
-available to third parties, in whole or in part. It is provided as is, without warranty of any kind and without
-any obligation to provide support or updates.
+[MIT License](LICENSE) - free to use, copy, modify and distribute. psclip is provided "as is", without warranty of
+any kind; the authors are not liable for any damage or loss arising from its use (see the license for the exact
+terms). There is no obligation to provide support or updates.

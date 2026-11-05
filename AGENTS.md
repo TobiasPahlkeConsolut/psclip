@@ -19,6 +19,7 @@ See [README.md](README.md) for features and usage.
 | `tests/New-DocsScreenshots.ps1`   | Takes the README screenshots (`docs/*.png`) with sample content      |
 | `tests/TestSupport.ps1`           | Window helpers shared by the two scripts above                       |
 | `docs/`                           | Screenshots for the README                                           |
+| `LICENSE`                         | MIT License                                                          |
 
 ## Hard constraints
 
@@ -26,7 +27,7 @@ See [README.md](README.md) for features and usage.
   registry values or any other storage without the owner asking for it - it is the defining feature. Settings
   changed in the tray menu (hotkey, dark mode, window size, keep awake) therefore last until exit; permanent
   settings are script parameters, passed on by `Install.ps1`.
-- **For consolut internal use only** - keep the "Internal use" section at the end of the README.
+- **MIT License** (`LICENSE`) - keep the "License" section at the end of the README.
 - **Windows PowerShell 5.1 only**, no PowerShell 7 syntax: no `? :`, `??`, `?.`, `&&`, `||`, `-Parallel`.
   `[Type]::new()` and `using namespace` are fine (5.0+).
 - **`PsClip.cs` is compiled as C# 5**: no string interpolation (`$"..."`), `?.`, `nameof`, expression-bodied
