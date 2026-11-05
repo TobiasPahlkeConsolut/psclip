@@ -224,6 +224,18 @@ Describe 'Receive-ClipboardChange' {
         Assert-MockCalled Read-ClipboardEntry -Scope It -Exactly 0
         $State.History.Count | Should Be 0
     }
+
+    It 'reads a change once after the delay, however many notifications came until then' {
+        Request-ClipboardRead
+        Request-ClipboardRead   # e.g. set, then flush
+        $Ui.ClipboardTimer.Enabled | Should Be $true
+        Assert-MockCalled Read-ClipboardEntry -Scope It -Exactly 0
+        Receive-PendingClipboardChange   # the timer tick
+        $Ui.ClipboardTimer.Enabled | Should Be $false
+        Receive-PendingClipboardChange   # e.g. the popup opening afterwards: nothing pending
+        Assert-MockCalled Read-ClipboardEntry -Scope It -Exactly 1
+        $State.History -join '|' | Should BeExactly 'new'
+    }
 }
 
 Describe 'New-ClipboardData' {

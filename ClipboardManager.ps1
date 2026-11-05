@@ -216,6 +216,11 @@ $MaxPreviewLength = 100000   # characters shown in the preview
 $MaxImageBytes = 50MB            # PNG offered on the clipboard
 $MaxImagePixels = 100000000      # 100 megapixels
 
+# A clipboard change is read this many milliseconds after its first notification. One copy often sends two
+# (set, then flush), and other programs (Teams, remote desktop clients) read it at once: reading right away can
+# find the clipboard busy and miss the formatting. The popup reads a pending change when it opens.
+$ClipboardReadDelay = 100
+
 # Memory the history may use (-MaxMemory, "Memory limit" in the tray menu)
 $MemoryLimits = [ordered]@{ '100MB' = 100MB; '500MB' = 500MB; '1GB' = 1GB }
 $MaxListItems = 1000   # entries shown in the list at most; the filter searches all of them
@@ -337,6 +342,7 @@ finally {
     # error that stopped the startup.
     if ($Ui.ContainsKey('KeepAwakeTimer')) { $Ui.KeepAwakeTimer.Dispose() }
     if ($Ui.ContainsKey('OcrTimer')) { $Ui.OcrTimer.Dispose() }
+    if ($Ui.ContainsKey('ClipboardTimer')) { $Ui.ClipboardTimer.Dispose() }
     if ($Ui.ContainsKey('Tray')) {
         $Ui.Tray.Visible = $false
         $Ui.Tray.Dispose()

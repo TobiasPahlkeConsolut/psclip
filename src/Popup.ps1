@@ -11,6 +11,7 @@ function Show-Popup {
     # choosing an entry pastes it into the window that was active before; otherwise it is only copied.
     param([switch]$PasteIntoActiveWindow)
 
+    Receive-PendingClipboardChange   # a copy made just now, still waiting for ClipboardReadDelay
     $State.PasteTarget = [IntPtr]::Zero
     if ($PasteIntoActiveWindow) {
         $active = [PsClip.Native]::GetForegroundWindow()

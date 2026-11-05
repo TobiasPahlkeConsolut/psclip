@@ -453,8 +453,13 @@ function New-ClipboardIcon {
 }
 
 function Start-ClipboardListener {
+    $timer = [System.Windows.Forms.Timer]::new()
+    $timer.Interval = $ClipboardReadDelay
+    $timer.add_Tick({ Receive-PendingClipboardChange })
+    $Ui.ClipboardTimer = $timer
+
     $Ui.ClipHost = [PsClip.ClipboardHost]::new($InstanceName)
-    $Ui.ClipHost.add_ClipboardChanged({ Receive-ClipboardChange })
+    $Ui.ClipHost.add_ClipboardChanged({ Request-ClipboardRead })
     $Ui.ClipHost.add_HotkeyPressed({ Switch-Popup })
     $Ui.ClipHost.add_CloseRequested({ $Ui.AppContext.ExitThread() })
 }

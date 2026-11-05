@@ -94,6 +94,20 @@ function Read-ClipboardImage {
     $entry
 }
 
+function Request-ClipboardRead {
+    # A clipboard change: read $ClipboardReadDelay ms after the first notification, once for all notifications
+    # until then. Not restarted by each one: a program that keeps changing the clipboard would delay it forever.
+    if (-not $Ui.ClipboardTimer.Enabled) { $Ui.ClipboardTimer.Enabled = $true }
+}
+
+function Receive-PendingClipboardChange {
+    # The read requested by Request-ClipboardRead - when the delay is over, or right away when the popup
+    # opens (a copy just before the hotkey must be in the list).
+    if (-not $Ui.ClipboardTimer.Enabled) { return }
+    $Ui.ClipboardTimer.Enabled = $false
+    Receive-ClipboardChange
+}
+
 function Receive-ClipboardChange {
     # The clipboard change caused by pasting an entry is not recorded again: the entry is already
     # in the history, and a plain-text paste must not replace its formatting.

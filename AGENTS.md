@@ -110,6 +110,11 @@ See [README.md](README.md) for features and usage.
   `pinned.dat.unreadable-<date>`, and stays off for one that cannot be opened. Tray messages are cut at 255
   characters (`Show-TrayWarning`), so keep them short and put no paths in them. If the format ever changes, keep
   reading the old `FormatVersion` - otherwise users lose their pinned entries.
+- Clipboard notifications are read `$ClipboardReadDelay` (100 ms) after the first one (`Request-ClipboardRead`, a
+  timer that further notifications do not restart, so constant changes cannot postpone it); `Show-Popup` reads a
+  pending change first, so a copy just before the hotkey is listed. Reading at once collided with other readers
+  (Teams, the Horizon client, a second psclip) and read one copy twice (set, then flush) - a second read that missed
+  the formatting replaced the formatted entry with plain text.
 - `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
   `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,

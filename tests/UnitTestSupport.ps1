@@ -86,6 +86,7 @@ function Reset-TestState {
         HotkeyMenuItem  = [pscustomobject]@{ Text = '' }
         Tray            = [pscustomobject]@{ Text = '' }
         KeepAwakeTimer  = [pscustomobject]@{ Enabled = $false }
+        ClipboardTimer  = [pscustomobject]@{ Enabled = $false }
         ThumbnailHeight = 22
     }
     $script:MemoryLimits = [ordered]@{ '100MB' = 100MB; '500MB' = 500MB; '1GB' = 1GB }
