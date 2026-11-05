@@ -35,8 +35,8 @@ See [README.md](README.md) for features and usage.
 - **Nothing is persisted** - with one opt-in exception the owner asked for: `-KeepPinned` saves the pinned entries,
   encrypted (see Architecture). The history and runtime settings live in memory only. Do not add files, registry
   values or any other storage without the owner asking for it - it is the defining feature. Settings changed in the
-  tray menu (hotkey, dark mode, window size, keep awake) therefore last until exit; permanent settings are script
-  parameters, passed on by `Install.ps1`.
+  tray menu (hotkey, dark mode, window size, keep pinned entries, keep awake, ...) therefore last until exit; permanent
+  settings are script parameters, passed on by `Install.ps1`.
 - **MIT License** (`LICENSE`) - keep the "License" section at the end of the README.
 - **Windows PowerShell 5.1 only**, no PowerShell 7 syntax: no `? :`, `??`, `?.`, `&&`, `||`, `-Parallel`.
   `[Type]::new()` and `using namespace` are fine (5.0+).
@@ -90,17 +90,20 @@ See [README.md](README.md) for features and usage.
   (`Start-ImageOcr`); a 50 ms timer (`Step-Ocr`) advances one job through decode -> convert -> recognize by checking
   whether the current WinRT task (converted with `AsTask`) is done. Never `.Wait()` on these tasks on the UI thread.
   `OcrText`: null = not yet recognized, `''` = no text. Without an OCR language `$Ui` has no `OcrEngine`.
-- `-KeepPinned` (`$State.PinnedFile`; `$null` without it): `Save-PinnedList` writes all pinned entries after every
-  change (pin, unpin, remove, a re-copied pinned text) - not at exit, which a crash or a killed process skips - and
-  `Restore-PinnedList` loads them at startup, after `Initialize-Ocr` and before the clipboard is first read. The file
-  is `pinned.dat` next to the script (`pinned-<InstanceName>.dat` for other instances), ignored by git.
+- "Keep pinned entries" (tray menu, `Set-KeepPinned`; `-KeepPinned` starts with it on; `$State.KeepPinned`):
+  `Save-PinnedList` writes all pinned entries after every change (pin, unpin, remove, a re-copied pinned text) - not
+  at exit, which a crash or a killed process skips - and `Restore-PinnedList` loads them at startup, after
+  `Initialize-Ocr` and before the clipboard is first read. Switching it on merges the saved entries into the pinned
+  ones (`Import-PinnedList`: no duplicates, out of the history) and saves; switching it off deletes the file, the
+  entries stay in memory. The file (`$State.PinnedFile`) is `pinned.dat` next to the script
+  (`pinned-<InstanceName>.dat` for other instances, e.g. the end-to-end test's), ignored by git.
   `PsClip.PinnedStore` writes its own binary format - never use a general-purpose deserializer (BinaryFormatter,
   CliXml) for it - encrypted with DPAPI (CurrentUser scope plus entropy; hence `System.Security` in `Add-Type`), via
   a temporary file and `File.Replace`. Strings are stored as raw UTF-16 so that every text comes back exactly
   (`SameContent`), images keep their PNG bytes (`ClipEntry.FromPng`) and their recognized text; images saved before
-  it was recognized are queued again. A file that cannot be read is left alone: that run neither loads nor saves
-  pinned entries, and the user gets a tray message. If the format ever changes, keep reading the old
-  `FormatVersion` - otherwise users lose their pinned entries.
+  it was recognized are queued again. A file that cannot be read at startup is left alone: the setting is switched
+  off and the user gets a tray message; switching it on replaces the file. If the format ever changes, keep reading
+  the old `FormatVersion` - otherwise users lose their pinned entries.
 - `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
   `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,

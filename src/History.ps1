@@ -297,34 +297,77 @@ function Get-PinnedFilePath {
 }
 
 function Restore-PinnedList {
-    # -KeepPinned, at startup: the pinned entries the last run saved (PsClip.PinnedStore). Returns a
-    # message for the user when the file cannot be read.
-    if (-not $State.PinnedFile) { return }
+    # At startup with -KeepPinned: the pinned entries the last run saved. Returns a message for the
+    # user when the file cannot be read.
+    if (-not $State.KeepPinned) { return }
 
+    $problem = Import-PinnedList
+    if ($problem) {
+        # Saving would replace the file with the entries pinned from now on - but it may be readable
+        # again later (e.g. locked only for the moment). So it is switched off, and the user decides.
+        $State.KeepPinned = $false
+        return "Could not read the saved pinned entries ($(Split-Path -Leaf $State.PinnedFile)): $problem " +
+            "'Keep pinned entries' is off - switching it on in the tray menu replaces the file."
+    }
+}
+
+function Import-PinnedList {
+    # Adds the saved pinned entries (PsClip.PinnedStore) after the pinned ones, except those already
+    # pinned; an entry also in the history moves out of it. Returns the problem if the file cannot be read.
     try {
         $entries = [PsClip.PinnedStore]::Load($State.PinnedFile, $Ui.ThumbnailHeight)
     }
     catch {
-        # Saving would replace the file with the entries pinned from now on - but it may be readable
-        # again later (e.g. locked only for the moment). So this run does not save at all.
         $message = $_.Exception.GetBaseException().Message.Trim()
-        $fileName = Split-Path -Leaf $State.PinnedFile
         Write-Verbose "Could not read the pinned entries from $($State.PinnedFile): $message"
-        $State.PinnedFile = $null
-        return "Could not read the saved pinned entries ($fileName): $message Pinned entries are not " +
-            'saved until psclip can read the file - delete it to start over.'
+        return $message
     }
+    $added = 0
     foreach ($entry in $entries) {
+        if ((Find-ClipboardEntry $State.Pinned $entry) -ge 0) { continue }
+        $index = Find-ClipboardEntry $State.History $entry
+        if ($index -ge 0) { $State.History.RemoveAt($index) }
         $State.Pinned.Add($entry)
+        $added++
         if ($entry.IsImage) { Start-ImageOcr $entry }   # unless its text was recognized before saving
     }
-    Write-Verbose "Restored $($entries.Count) pinned entries from $($State.PinnedFile)."
+    Write-Verbose "Restored $added pinned entries from $($State.PinnedFile)."
+}
+
+function Set-KeepPinned {
+    # Tray menu "Keep pinned entries". On: adds the saved entries (a file from an earlier run) and saves
+    # all pinned entries. Off: deletes the file - the pinned entries stay until exit, so switching it on
+    # again saves them again.
+    param([bool]$Enabled)
+
+    $State.KeepPinned = $Enabled
+    if ($Enabled) {
+        $State.PinnedSaveFailed = $false
+        $problem = Import-PinnedList
+        Limit-ClipboardHistory
+        Save-PinnedList
+        if ($problem -and -not $State.PinnedSaveFailed) {
+            Show-TrayWarning "The saved pinned entries could not be read ($problem) and were replaced."
+        }
+        Update-TrayText
+        if ($Ui.Form.Visible) { Update-PopupList }
+    }
+    else {
+        try {
+            [System.IO.File]::Delete($State.PinnedFile)   # no error when there is no file
+            [System.IO.File]::Delete("$($State.PinnedFile).tmp")
+        }
+        catch {
+            Show-TrayWarning "Could not delete the saved pinned entries: $($_.Exception.GetBaseException().Message)"
+        }
+    }
+    Write-Verbose "Keep pinned entries $(if ($Enabled) { 'on' } else { 'off' })."
 }
 
 function Save-PinnedList {
-    # -KeepPinned: writes the pinned entries after every change, not at exit - a crash, a killed process
-    # or a power cut would skip that. Pinned entries change rarely, so this costs next to nothing.
-    if (-not $State.PinnedFile) { return }
+    # "Keep pinned entries": writes them after every change, not at exit - a crash, a killed process or
+    # a power cut would skip that. Pinned entries change rarely, so this costs next to nothing.
+    if (-not $State.KeepPinned) { return }
 
     try {
         [PsClip.PinnedStore]::Save($State.PinnedFile, $State.Pinned)

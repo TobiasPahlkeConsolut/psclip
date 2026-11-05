@@ -406,16 +406,19 @@ Describe 'Clipboard history' {
 Describe 'Saved pinned entries (-KeepPinned)' {
     BeforeEach {
         Reset-TestState
+        $State.KeepPinned = $true
         $State.PinnedFile = Join-Path $TestDrive 'pinned.dat'
         if (Test-Path -LiteralPath $State.PinnedFile) { Remove-Item -LiteralPath $State.PinnedFile }
     }
     Mock Show-TrayWarning {}
 
     function Restart-WithSavedPins {
-        # The next run: empty state with the same file, then the startup step. Returns its message.
+        # The next run (with -KeepPinned): empty state with the same file, then the startup step.
+        # Returns its message.
         param([switch]$WithOcr)
         $file = $State.PinnedFile
         Reset-TestState
+        $State.KeepPinned = $true
         $State.PinnedFile = $file
         if ($WithOcr) {
             $Ui.OcrEngine = 'stand-in'
@@ -511,8 +514,8 @@ Describe 'Saved pinned entries (-KeepPinned)' {
         $State.Pinned -join '|' | Should BeExactly 'a'
     }
 
-    It 'writes nothing without -KeepPinned' {
-        $State.PinnedFile = $null
+    It 'writes nothing when it is off' {
+        $State.KeepPinned = $false
         Add-Entries 'a'
         Switch-ClipboardPin (Get-Entry 'a')
         @(Get-ChildItem -LiteralPath $TestDrive -Filter 'pinned*').Count | Should Be 0
@@ -534,14 +537,56 @@ Describe 'Saved pinned entries (-KeepPinned)' {
             Should BeGreaterThan 0
     }
 
-    It 'keeps a file it cannot read, says so and does not save in this run' {
+    It 'keeps a file it cannot read and switches off - until the user switches it on, which replaces it' {
         [System.IO.File]::WriteAllBytes($State.PinnedFile, [byte[]](1..100))
-        Restart-WithSavedPins | Should Match 'Could not read the saved pinned entries \(pinned\.dat\): .+ delete it'
+        Restart-WithSavedPins |
+            Should Match "Could not read the saved pinned entries \(pinned\.dat\): .+ 'Keep pinned entries' is off"
+        $State.KeepPinned | Should Be $false
         $State.Pinned.Count | Should Be 0
         Add-Entries 'a'
         Switch-ClipboardPin (Get-Entry 'a')
-        [System.IO.File]::ReadAllBytes((Join-Path $TestDrive 'pinned.dat')) -join ',' |
-            Should BeExactly ((1..100) -join ',')
+        [System.IO.File]::ReadAllBytes($State.PinnedFile) -join ',' | Should BeExactly ((1..100) -join ',')
+
+        Set-KeepPinned $true
+        (Read-SavedPins) -join '|' | Should BeExactly 'a'
+        Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It -ParameterFilter { $Text -like '*replaced*' }
+    }
+
+    It 'switched on in the tray menu, saves the pinned entries right away' {
+        $State.KeepPinned = $false
+        Add-Entries 'a', 'b'
+        Switch-ClipboardPin (Get-Entry 'a')
+        Test-Path -LiteralPath $State.PinnedFile | Should Be $false
+        Set-KeepPinned $true
+        $State.KeepPinned | Should Be $true
+        (Read-SavedPins) -join '|' | Should BeExactly 'a'
+        Switch-ClipboardPin (Get-Entry 'b')
+        (Read-SavedPins) -join '|' | Should BeExactly 'a|b'
+    }
+
+    It 'switched on, adds the entries an earlier run saved - once, and out of the history' {
+        $State.KeepPinned = $false
+        $saved = [PsClip.ClipEntry[]]@([PsClip.ClipEntry]::new('both'), [PsClip.ClipEntry]::new('saved'))
+        [PsClip.PinnedStore]::Save($State.PinnedFile, $saved)
+        Add-Entries 'both', 'saved', 'other'
+        Switch-ClipboardPin (Get-Entry 'both')
+        Set-KeepPinned $true
+        $State.Pinned -join '|' | Should BeExactly 'both|saved'
+        $State.History -join '|' | Should BeExactly 'other'
+        (Read-SavedPins) -join '|' | Should BeExactly 'both|saved'
+        $Ui.Tray.Text | Should Match ': 3 entries \('
+    }
+
+    It 'switched off, deletes the file but keeps the pinned entries until exit' {
+        Add-Entries 'a', 'b'
+        Switch-ClipboardPin (Get-Entry 'a')
+        Set-KeepPinned $false
+        Test-Path -LiteralPath $State.PinnedFile | Should Be $false
+        $State.Pinned -join '|' | Should BeExactly 'a'
+        Switch-ClipboardPin (Get-Entry 'b')
+        Test-Path -LiteralPath $State.PinnedFile | Should Be $false
+        Set-KeepPinned $true   # a misclick costs nothing
+        (Read-SavedPins) -join '|' | Should BeExactly 'a|b'
     }
 
     It 'refuses damaged data instead of allocating what a damaged length claims' {

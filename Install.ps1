@@ -42,8 +42,8 @@
     Passed on to ClipboardManager.ps1: idle seconds before "Keep awake" presses F15 (default 30).
 
 .PARAMETER KeepPinned
-    Passed on to ClipboardManager.ps1: keep the pinned entries when psclip exits (saved encrypted
-    to pinned.dat in this folder).
+    Passed on to ClipboardManager.ps1: start with "Keep pinned entries" switched on - pinned entries
+    are saved encrypted to pinned.dat in this folder and survive restarts.
 
 .PARAMETER Force
     Restart a running psclip without asking.

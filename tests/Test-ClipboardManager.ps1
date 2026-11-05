@@ -6,7 +6,7 @@
     Starts the clipboard manager in a background process and drives it with window messages
     and real keystrokes: clipboard capture, de-duplication, private content, popup, filter,
     pinning, pasting into another window, preview, popup size, the tray menu (window size, memory
-    limit, hotkey dialog, dark mode, keep awake) and graceful shutdown.
+    limit, open at, hotkey dialog, dark mode, keep pinned entries, keep awake) and graceful shutdown.
 
     The test briefly opens windows and sends key presses - do not type, click or move the mouse
     while it runs (about a minute). Real keystrokes are only sent after checking that the expected
@@ -69,6 +69,9 @@ if (-not (Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey)) {
 }
 
 $managerScript = (Resolve-Path (Join-Path $PSScriptRoot '..\ClipboardManager.ps1')).Path
+# "Keep pinned entries" of the test instance - its own file (InstanceName), never the user's pinned.dat
+$pinnedFile = Join-Path (Split-Path $managerScript) "pinned-$instanceName.dat"
+if (Test-Path -LiteralPath $pinnedFile) { Remove-Item -LiteralPath $pinnedFile }   # left by an aborted run
 [void](New-Item -ItemType Directory -Force -Path $OutputDirectory)
 $log = Join-Path $OutputDirectory 'manager.log'
 $errorLog = Join-Path $OutputDirectory 'manager.err.log'
@@ -486,8 +489,22 @@ try {
         [Math]::Abs($accessibleCaret.Left - $caret.Left) -le 2
     Add-Result 'The text cursor is found through accessibility too (browsers)' $sameCaret "$accessibleCaret"
 
+    # --- tray menu: Keep pinned entries (the test instance's own file; the entry pinned above) ---
+    $keepPinnedItem = @($keyDown) * 8 + $keyEnter   # 8x Down -> Keep pinned entries
+    $pinnedSaved = $pinnedDeleted = $false
+    if ((Open-TrayMenu) -and (Send-MenuKeys $keepPinnedItem)) {
+        $pinnedSaved = Wait-Until {
+            (Test-Path -LiteralPath $pinnedFile) -and (Get-Item -LiteralPath $pinnedFile).Length -gt 0
+        }
+        if ((Open-TrayMenu) -and (Send-MenuKeys $keepPinnedItem)) {
+            $pinnedDeleted = Wait-Until { -not (Test-Path -LiteralPath $pinnedFile) }
+        }
+    }
+    Add-Result 'Tray menu: keep pinned entries saves them' $pinnedSaved $pinnedFile
+    Add-Result 'Switched off, the saved file is deleted' $pinnedDeleted
+
     # --- tray menu: Keep awake (presses F15 after $keepAwakeSeconds s without input) ---
-    $keepAwakeItem = @($keyDown) * 8 + $keyEnter   # 8x Down -> Keep awake
+    $keepAwakeItem = @($keyDown) * 9 + $keyEnter   # 9x Down -> Keep awake
     $idleOn = $idleOff = -1
     if ((Open-TrayMenu) -and (Send-MenuKeys $keepAwakeItem)) {
         $idleOn = Measure-MaxIdle 6000
@@ -512,6 +529,7 @@ finally {
     $exited = $manager.WaitForExit(5000)
     Add-Result 'Graceful shutdown via WM_CLOSE' $exited
     if (-not $exited) { Stop-Process -Id $manager.Id -Force }
+    if (Test-Path -LiteralPath $pinnedFile) { Remove-Item -LiteralPath $pinnedFile }
 
     Restore-Clipboard $savedClipboard
     $results | Format-Table -AutoSize -Wrap | Out-String -Width 160 | Write-Host

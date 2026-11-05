@@ -357,6 +357,10 @@ function New-TrayIcon {
         })
     }
     [void]$menu.Items.Add($Ui.MemoryMenuItem)
+
+    $Ui.KeepPinnedMenuItem = $menu.Items.Add('Keep pinned entries')
+    $Ui.KeepPinnedMenuItem.ToolTipText = 'Saves them encrypted (pinned.dat) for the next start; off deletes the file'
+    $Ui.KeepPinnedMenuItem.add_Click({ Set-KeepPinned (-not $State.KeepPinned) })
     [void]$menu.Items.Add([ToolStripSeparator]::new())
 
     $Ui.KeepAwakeMenuItem = $menu.Items.Add('Keep awake')
@@ -393,6 +397,7 @@ function Update-TrayMenu {
     foreach ($item in $Ui.MemoryMenuItem.DropDownItems) {
         $item.Checked = $item.Tag -eq $State.MemoryLimit
     }
+    $Ui.KeepPinnedMenuItem.Checked = $State.KeepPinned
     $Ui.KeepAwakeMenuItem.Checked = $State.KeepAwake
 }
 

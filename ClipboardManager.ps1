@@ -7,7 +7,7 @@
     every image (e.g. screenshots), and keeps the most recent entries in memory. Text in images
     is recognized in the background (Windows' built-in OCR), so the filter finds images by their
     content too. Nothing is written to disk: the history is gone when the script exits - and so
-    are the pinned entries, unless -KeepPinned saves them.
+    are the pinned entries, unless "Keep pinned entries" (-KeepPinned) saves them.
 
     Press the hotkey (see -Hotkey) to open the history at the mouse pointer (or the text cursor,
     see -OpenAt):
@@ -26,8 +26,8 @@
     (also the text recognized in an image); drag the bar on its top edge to make it bigger, or
     the bar between an image and its text. Sizes and F3 are reset when the popup opens again.
     Left-click the tray icon to open the history in copy-only mode; right-click it for "Clear
-    history", the settings (hotkey, dark mode, window size, where the popup opens, memory limit) and
-    "Exit". Settings changed there last until the script exits.
+    history", the settings (hotkey, dark mode, window size, where the popup opens, memory limit,
+    keeping pinned entries) and "Exit". Settings changed there last until the script exits.
 
     Entries that the source application marks as private (password managers set the
     ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory formats) are
@@ -81,10 +81,11 @@
     Seconds without mouse or keyboard input after which "Keep awake" presses the F15 key.
 
 .PARAMETER KeepPinned
-    Keep the pinned entries when psclip exits: they are saved to the file pinned.dat next to this
-    script whenever they change, and loaded at the next start. The file is encrypted for your
-    Windows account (DPAPI), so other users cannot read it, nor can anyone on another computer.
-    The rest of the history is never saved. Delete the file to remove the saved entries.
+    Start with "Keep pinned entries" switched on (it can be switched in the tray menu): the pinned
+    entries are saved to the file pinned.dat next to this script whenever they change, and loaded
+    at the next start. The file is encrypted for your Windows account (DPAPI), so other users
+    cannot read it, nor can anyone on another computer. The rest of the history is never saved.
+    Switching it off in the tray menu deletes the file.
 
 .PARAMETER InstanceName
     Name of the instance's mutex and hidden window. Only needed to run a second, independent
@@ -250,7 +251,6 @@ $hotkeySpec = ConvertFrom-HotkeyText $Hotkey   # fails early on an invalid hotke
 if ($PSBoundParameters.ContainsKey('MaxItems') -or $PSBoundParameters.ContainsKey('MaxImages')) {
     Write-Verbose '-MaxItems and -MaxImages are ignored: the history is limited by -MaxMemory now.'
 }
-$pinnedFile = if ($KeepPinned) { Get-PinnedFilePath $PSScriptRoot $InstanceName } else { $null }
 
 # One instance per user session (per InstanceName)
 $mutex = [System.Threading.Mutex]::new($false, "Local\$InstanceName")
@@ -269,7 +269,8 @@ if (-not $ownsMutex) {
 $State = @{
     History              = [List[PsClip.ClipEntry]]::new()   # unpinned entries, newest first
     Pinned               = [List[PsClip.ClipEntry]]::new()   # pinned entries, in pin order
-    PinnedFile           = $pinnedFile           # -KeepPinned: where they are saved; $null = not saved
+    KeepPinned           = $KeepPinned.IsPresent # save the pinned entries; the tray menu switches it
+    PinnedFile           = Get-PinnedFilePath $PSScriptRoot $InstanceName   # where they are saved
     PinnedSaveFailed     = $false                # saving failed (reported once, not at every change)
     Filtered             = [List[PsClip.ClipEntry]]::new()   # entries currently shown in the popup
     FilteredPinnedCount  = 0
