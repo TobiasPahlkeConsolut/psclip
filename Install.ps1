@@ -271,7 +271,12 @@ if (Test-Elevated) {
 if (-not (Test-Path -LiteralPath $managerScript)) {
     throw "ClipboardManager.ps1 was not found next to Install.ps1 ($managerScript)."
 }
-Unblock-File -LiteralPath $managerScript, (Join-Path $PSScriptRoot 'PsClip.cs')   # downloaded files
+$partsFolder = Join-Path $PSScriptRoot 'src'
+if (-not (Test-Path -LiteralPath $partsFolder)) {
+    throw "The src folder was not found next to Install.ps1 ($partsFolder)."
+}
+# Downloaded as ZIP, the files are marked as coming from the internet.
+Unblock-File -LiteralPath (@($managerScript) + @(Get-ChildItem -LiteralPath $partsFolder -File).FullName)
 if ($PSBoundParameters.ContainsKey('Hotkey')) { Assert-Hotkey $Hotkey }
 
 $shortcutArguments = Get-ShortcutArguments $PSBoundParameters
@@ -296,7 +301,8 @@ if ($runningId -ne 0) {
         return
     }
     if (-not (Stop-ClipboardManager)) {
-        Write-Warning 'The running psclip did not exit. Exit it via its tray icon, then start "Clipboard Manager" from the Start menu.'
+        Write-Warning ('The running psclip did not exit. Exit it via its tray icon, then start ' +
+            '"Clipboard Manager" from the Start menu.')
         return
     }
 }

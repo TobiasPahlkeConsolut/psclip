@@ -1,251 +1,16 @@
-// Native helpers for ClipboardManager.ps1, compiled at startup with Add-Type.
-// Windows PowerShell 5.1 compiles this as C# 5 - see AGENTS.md. Keep the file ASCII-only.
+// psclip: Win32 calls: clipboard formats, foreground window, keyboard input, idle time.
+// Compiled with the other src\*.cs files at startup (Add-Type) as C# 5 - see AGENTS.md. ASCII only.
 
 using System;
-using System.ComponentModel;
 using System.Drawing;
-using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Text;
-using System.Threading;
 using System.Windows.Forms;
 using ComDataObject = System.Runtime.InteropServices.ComTypes.IDataObject;
 
 namespace PsClip
 {
-    // Hidden window that receives clipboard-change notifications and the global hotkey.
-    public sealed class ClipboardHost : NativeWindow, IDisposable
-    {
-        const int WM_CLOSE = 0x0010;
-        const int WM_HOTKEY = 0x0312;
-        const int WM_CLIPBOARDUPDATE = 0x031D;
-        const int HOTKEY_ID = 1;
-        const uint MOD_NOREPEAT = 0x4000;
-
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern bool AddClipboardFormatListener(IntPtr hwnd);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern bool RemoveClipboardFormatListener(IntPtr hwnd);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint vk);
-
-        [DllImport("user32.dll", SetLastError = true)]
-        static extern bool UnregisterHotKey(IntPtr hwnd, int id);
-
-        bool hotkeyRegistered;
-
-        public event EventHandler ClipboardChanged;
-        public event EventHandler HotkeyPressed;
-        public event EventHandler CloseRequested;   // WM_CLOSE posted by another program
-
-        public ClipboardHost(string caption)
-        {
-            CreateParams cp = new CreateParams();
-            cp.Caption = caption;
-            CreateHandle(cp);
-            if (!AddClipboardFormatListener(Handle))
-                throw new Win32Exception(Marshal.GetLastWin32Error());
-        }
-
-        // Returns false if the combination is already registered by another program.
-        public bool SetHotkey(uint modifiers, uint vk)
-        {
-            ClearHotkey();
-            hotkeyRegistered = RegisterHotKey(Handle, HOTKEY_ID, modifiers | MOD_NOREPEAT, vk);
-            return hotkeyRegistered;
-        }
-
-        public void ClearHotkey()
-        {
-            if (hotkeyRegistered) UnregisterHotKey(Handle, HOTKEY_ID);
-            hotkeyRegistered = false;
-        }
-
-        protected override void WndProc(ref Message m)
-        {
-            switch (m.Msg)
-            {
-                case WM_CLIPBOARDUPDATE:
-                    Raise(ClipboardChanged);
-                    return;
-                case WM_HOTKEY:
-                    if (m.WParam.ToInt32() == HOTKEY_ID) Raise(HotkeyPressed);
-                    return;
-                case WM_CLOSE:
-                    Raise(CloseRequested);
-                    return;
-            }
-            base.WndProc(ref m);
-        }
-
-        void Raise(EventHandler handler)
-        {
-            if (handler != null) handler(this, EventArgs.Empty);
-        }
-
-        public void Dispose()
-        {
-            if (Handle == IntPtr.Zero) return;
-            ClearHotkey();
-            RemoveClipboardFormatListener(Handle);
-            DestroyHandle();
-        }
-    }
-
-    // One history entry: a text with the formatting it was copied with - or an image.
-    public sealed class ClipEntry
-    {
-        public string Text;          // null for images
-        public string Html;          // "HTML Format" (CF_HTML), or null
-        public string Rtf;           // Rich Text Format, or null
-        public byte[] Png;           // images: the image, PNG-compressed (in memory only)
-        public int Width, Height;    // images: size in pixels
-        public Bitmap Thumbnail;     // images: small version for the list
-        public string OcrText;       // images: recognized text; null = not (yet) recognized, "" = none found
-        public DateTime Copied;
-        string imageHash;
-
-        public ClipEntry(string text)
-        {
-            Text = text;
-            Copied = DateTime.Now;
-        }
-
-        public static ClipEntry FromImage(Image image, int thumbnailHeight)
-        {
-            ClipEntry entry = new ClipEntry(null);
-            using (MemoryStream stream = new MemoryStream())
-            {
-                image.Save(stream, ImageFormat.Png);
-                entry.Png = stream.ToArray();
-            }
-            entry.Width = image.Width;
-            entry.Height = image.Height;
-            using (System.Security.Cryptography.SHA256 sha = System.Security.Cryptography.SHA256.Create())
-            {
-                entry.imageHash = Convert.ToBase64String(sha.ComputeHash(entry.Png));
-            }
-            entry.Thumbnail = CreateThumbnail(image, thumbnailHeight);
-            return entry;
-        }
-
-        public bool IsImage
-        {
-            get { return Png != null; }
-        }
-
-        public bool HasFormatting
-        {
-            get { return Html != null || Rtf != null; }
-        }
-
-        // The same entry for the history: equal text (the formatting may differ - the newer copy
-        // wins), or the same image.
-        public bool SameContent(ClipEntry other)
-        {
-            if (other == null) return false;
-            if (IsImage || other.IsImage) return IsImage && other.IsImage && imageHash == other.imageHash;
-            return string.Equals(Text, other.Text, StringComparison.Ordinal);
-        }
-
-        // A new bitmap of the image (the caller owns it).
-        public Bitmap ToBitmap()
-        {
-            using (MemoryStream stream = new MemoryStream(Png))
-            using (Image image = Image.FromStream(stream))
-            {
-                return new Bitmap(image);   // a copy: FromStream needs its stream as long as the image lives
-            }
-        }
-
-        static Bitmap CreateThumbnail(Image image, int height)
-        {
-            double scale = Math.Min(1.0, Math.Min((double)height / image.Height, 3.0 * height / image.Width));
-            int width = Math.Max(1, (int)Math.Round(image.Width * scale));
-            int thumbnailHeight = Math.Max(1, (int)Math.Round(image.Height * scale));
-            Bitmap thumbnail = new Bitmap(width, thumbnailHeight);
-            using (Graphics graphics = Graphics.FromImage(thumbnail))
-            {
-                graphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                graphics.DrawImage(image, 0, 0, width, thumbnailHeight);
-            }
-            return thumbnail;
-        }
-
-        public override string ToString()
-        {
-            return IsImage ? "Image " + Width + " x " + Height : Text;
-        }
-    }
-
-    // Context menu colors (the default renderer ignores BackColor for most parts).
-    public sealed class MenuColors : ProfessionalColorTable
-    {
-        readonly Color back, hover, border;
-
-        public MenuColors(Color back, Color hover, Color border)
-        {
-            this.back = back;
-            this.hover = hover;
-            this.border = border;
-            UseSystemColors = false;
-        }
-
-        public override Color ToolStripDropDownBackground { get { return back; } }
-        public override Color ImageMarginGradientBegin { get { return back; } }
-        public override Color ImageMarginGradientMiddle { get { return back; } }
-        public override Color ImageMarginGradientEnd { get { return back; } }
-        public override Color MenuBorder { get { return border; } }
-        public override Color MenuItemBorder { get { return hover; } }
-        public override Color MenuItemSelected { get { return hover; } }
-        public override Color MenuItemSelectedGradientBegin { get { return hover; } }
-        public override Color MenuItemSelectedGradientEnd { get { return hover; } }
-        public override Color SeparatorDark { get { return border; } }
-        public override Color SeparatorLight { get { return border; } }
-    }
-
-    // Draws check marks and submenu arrows in the text color - the defaults are black and
-    // invisible on a dark background.
-    public sealed class MenuRenderer : ToolStripProfessionalRenderer
-    {
-        readonly Color text;
-
-        public MenuRenderer(Color back, Color hover, Color border, Color text)
-            : base(new MenuColors(back, hover, border))
-        {
-            this.text = text;
-        }
-
-        protected override void OnRenderItemCheck(ToolStripItemImageRenderEventArgs e)
-        {
-            Rectangle r = e.ImageRectangle;
-            PointF[] points =
-            {
-                new PointF(r.Left + r.Width * 0.18f, r.Top + r.Height * 0.52f),
-                new PointF(r.Left + r.Width * 0.40f, r.Top + r.Height * 0.74f),
-                new PointF(r.Left + r.Width * 0.82f, r.Top + r.Height * 0.28f)
-            };
-            SmoothingMode previous = e.Graphics.SmoothingMode;
-            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
-            using (Pen pen = new Pen(text, Math.Max(1.5f, r.Height / 9f)))
-            {
-                e.Graphics.DrawLines(pen, points);
-            }
-            e.Graphics.SmoothingMode = previous;
-        }
-
-        protected override void OnRenderArrow(ToolStripArrowRenderEventArgs e)
-        {
-            e.ArrowColor = text;
-            base.OnRenderArrow(e);
-        }
-    }
-
     public static class Native
     {
         [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -261,14 +26,16 @@ namespace PsClip
         [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extraInfo);
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);
         [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
-        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+        [DllImport("dwmapi.dll")]
+        static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
         [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr handle);
         [DllImport("kernel32.dll")] static extern bool GlobalUnlock(IntPtr handle);
         [DllImport("kernel32.dll")] static extern UIntPtr GlobalSize(IntPtr handle);
         [DllImport("ole32.dll")] static extern void ReleaseStgMedium(ref STGMEDIUM medium);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-        static extern int ToUnicode(uint vk, uint scanCode, byte[] keyState, StringBuilder buffer, int bufferSize, uint flags);
+        static extern int ToUnicode(uint vk, uint scanCode, byte[] keyState, StringBuilder buffer, int bufferSize,
+            uint flags);
 
         [StructLayout(LayoutKind.Sequential)]
         struct Input
@@ -318,7 +85,8 @@ namespace PsClip
         static extern bool PeekMessage(out Msg msg, IntPtr hwnd, uint filterMin, uint filterMax, uint remove);
 
         [DllImport("user32.dll")]
-        static extern uint MsgWaitForMultipleObjects(uint count, IntPtr[] handles, bool waitAll, uint milliseconds, uint wakeMask);
+        static extern uint MsgWaitForMultipleObjects(uint count, IntPtr[] handles, bool waitAll, uint milliseconds,
+            uint wakeMask);
 
         [DllImport("user32.dll", CharSet = CharSet.Unicode)]
         static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, string lParam);

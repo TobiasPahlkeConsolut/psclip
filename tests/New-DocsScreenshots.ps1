@@ -72,7 +72,8 @@ function Save-PopupImage {
     $area = [System.Windows.Forms.Screen]::FromPoint($cursor).WorkingArea
     $rect = [TestNative]::RectOf($popup)
     $width = $rect.Right - $rect.Left
-    $x = if ($cursor.X - $width - 60 -ge $area.Left) { $cursor.X - $width - 60 } else { [Math]::Min($cursor.X + 60, $area.Right - $width) }
+    $left = $cursor.X - $width - 60   # left of the cursor if it fits there, else right of it
+    $x = if ($left -ge $area.Left) { $left } else { [Math]::Min($cursor.X + 60, $area.Right - $width) }
     $noSizeNoZOrderNoActivate = 0x15
     [void][TestNative]::SetWindowPos($popup, [IntPtr]::Zero, $x, $area.Top + 40, 0, 0, $noSizeNoZOrderNoActivate)
     [void][TestNative]::PostMessage($popup, 0x02A2 <# WM_NCMOUSELEAVE #>, [IntPtr]::Zero, [IntPtr]::Zero)
@@ -105,7 +106,8 @@ try {
             Copy-Sample 'https://github.com/TobiasPahlkeConsolut/psclip'
             $agenda = [DataObject]::new()
             $agenda.SetText("Agenda: release planning`r`n1. Open issues`r`n2. Budget`r`n3. Next steps")
-            $agenda.SetData([DataFormats]::Rtf, '{\rtf1\ansi{\b Agenda: release planning}\par 1. Open issues\par 2. Budget\par 3. Next steps}')
+            $agenda.SetData([DataFormats]::Rtf,
+                '{\rtf1\ansi{\b Agenda: release planning}\par 1. Open issues\par 2. Budget\par 3. Next steps}')
             Copy-Sample $agenda
             Copy-Sample 'Get-ChildItem -Recurse -Filter *.log | Remove-Item -WhatIf'
             Copy-Sample (New-SampleImage)

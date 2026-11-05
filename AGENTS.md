@@ -9,10 +9,19 @@ See [README.md](README.md) for features and usage.
 
 | File                              | Purpose                                                              |
 | --------------------------------- | -------------------------------------------------------------------- |
-| `ClipboardManager.ps1`            | The app (tray, popup, hotkey, clipboard listener, keep awake)        |
-| `PsClip.cs`                       | C# helpers (Win32 interop, menu renderer), compiled with `Add-Type`  |
+| `ClipboardManager.ps1`            | Entry point: help, parameters, settings, loads `src/`, startup (Main) |
+| `src/Hotkey.ps1`                  | Parsing/checking hotkeys, registering them, the "Change hotkey" dialog |
+| `src/History.ps1`                 | Reading/writing the clipboard; adding, pinning, dropping entries     |
+| `src/Popup.ps1`                   | Popup behavior: show/hide, filtered list, keys, preview, status line |
+| `src/Theme.ps1`                   | Dark and light mode                                                  |
+| `src/Ocr.ps1`                     | Text in images (Windows.Media.Ocr), in the background                |
+| `src/KeepAwake.ps1`               | Keep awake (unrelated to the clipboard)                              |
+| `src/Window.ps1`                  | Building the popup window, the menus and the tray icon               |
+| `src/*.cs`                        | C# helpers, compiled together with `Add-Type`: `Native` (Win32 calls), `ClipboardHost` (hidden window), `ClipEntry`, `MenuRenderer` |
 | `Install.ps1`                     | Creates/removes Start menu and autostart shortcuts                   |
-| `tests/ClipboardManager.Tests.ps1`| Unit tests of the app (Pester 3.4 syntax)                            |
+| `tests/<Part>.Tests.ps1`          | Unit tests per part file (Pester 3.4 syntax)                         |
+| `tests/UnitTestSupport.ps1`       | Shared unit-test setup: loads the app, `Reset-TestState`, helpers    |
+| `tests/Style.Tests.ps1`           | Formatting rules for all `.ps1`/`.cs` files (see Style)              |
 | `tests/Install.Tests.ps1`         | Unit tests of `Install.ps1` (never touches a running psclip)         |
 | `tests/Invoke-UnitTests.ps1`      | Runs all `*.Tests.ps1` with Pester 3/4                               |
 | `tests/Test-ClipboardManager.ps1` | End-to-end test on the real desktop                                  |
@@ -30,7 +39,7 @@ See [README.md](README.md) for features and usage.
 - **MIT License** (`LICENSE`) - keep the "License" section at the end of the README.
 - **Windows PowerShell 5.1 only**, no PowerShell 7 syntax: no `? :`, `??`, `?.`, `&&`, `||`, `-Parallel`.
   `[Type]::new()` and `using namespace` are fine (5.0+).
-- **`PsClip.cs` is compiled as C# 5**: no string interpolation (`$"..."`), `?.`, `nameof`, expression-bodied
+- **`src/*.cs` is compiled as C# 5**: no string interpolation (`$"..."`), `?.`, `nameof`, expression-bodied
   members (`=>`), `out var`, tuples. Lambdas and anonymous delegates are fine.
 - **Source files must be pure ASCII** (`.ps1` and `.cs`). PowerShell 5.1 reads BOM-less files as ANSI, so any
   non-ASCII character is garbled. Write special characters as `[char]0x21B5` etc. (that is also why the default
@@ -41,11 +50,16 @@ See [README.md](README.md) for features and usage.
   3.4). Never install software (no winget, no PSGallery modules) without asking.
 - The comment-based help block must stay **above** the `using namespace` lines, otherwise `Get-Help` ignores it.
 
-## Architecture of ClipboardManager.ps1
+## Architecture
 
-Regions in order: help, `using`, `param`, Native helpers (loads `PsClip.cs`), Settings, Hotkey, Clipboard and
-history, Popup, Theme, Text in images (OCR), Keep awake, Window construction, Main.
+`ClipboardManager.ps1` in order: help, `using`, `param`, Native helpers (compiles `src/*.cs`), Settings, Functions
+(dot-sources the `src/*.ps1` part files), Main.
 
+- **The part files are dot-sourced, not modules**: they run in the script scope of `ClipboardManager.ps1`, so they
+  share `$State`, `$Ui`, the parameters and the settings variables like one big script (a `.psm1` module would get
+  its own scope). Each part file needs its own `using namespace` lines (they apply per file). A new part file must
+  be added to the Functions region (`tests/Style.Tests.ps1` checks that), a new `.cs` file in `src/` is compiled
+  automatically.
 - **Dot-sourcing loads only the functions**: the first line of the Main region returns when
   `$MyInvocation.InvocationName -eq '.'`. The unit tests rely on this; keep all startup code below that guard.
   `Install.ps1` has the same guard, and its `Assert-Hotkey` dot-sources the app inside a function to reuse
@@ -144,21 +158,21 @@ history, Popup, Theme, Text in images (OCR), Keep awake, Window construction, Ma
 ## Style
 
 - 4 spaces, opening brace on the same line, `else`/`catch` on a new line after `}`.
+- Lines of at most 120 characters, no tabs, no trailing whitespace. Wrap after `|`, `,`, `+`, `(` or `=`, or
+  use a variable; backticks only for long `Add-Result`-style argument lists.
 - Approved verbs for function names (`Get-Verb`), one statement per line, comments explain *why*.
 - Keep `Set-StrictMode -Version 2.0` and `$ErrorActionPreference = 'Stop'` passing.
+- `tests/Style.Tests.ps1` checks the mechanical rules (ASCII, tabs, whitespace, line length, `else` placement,
+  parse errors) - there is no formatter or PSScriptAnalyzer (not installed, and nothing gets installed).
 
 ## Verifying changes
 
-1. Parse check (no output = OK):
-   ```powershell
-   $e = $null; [void][Management.Automation.Language.Parser]::ParseFile("$PWD\ClipboardManager.ps1", [ref]$null, [ref]$e); $e
-   ```
-2. ASCII check (see above) for every changed `.ps1` and `.cs`.
-3. Unit tests - fast and invisible, run them after every change; add tests for new logic:
+1. Unit tests - fast and invisible, run them after every change; add tests for new logic. They include the parse
+   and ASCII checks for every `.ps1` and `.cs` (`Style.Tests.ps1`):
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Invoke-UnitTests.ps1
    ```
-4. End-to-end test - **ask the user first** (or have their standing permission): it opens windows on their desktop
+2. End-to-end test - **ask the user first** (or have their standing permission): it opens windows on their desktop
    and sends real keystrokes for about 45 seconds (guarded by foreground checks; the clipboard is restored
    afterwards). It runs its own instance next to the user's psclip, which records the test's entries
    (`psclip test: ...`). It navigates the tray menu by counting `Down` presses (`Send-MenuKeys`) - update those
@@ -168,7 +182,7 @@ history, Popup, Theme, Text in images (OCR), Keep awake, Window construction, Ma
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Light
    ```
    Exit code 0 = all steps passed. Look at the screenshots it writes to `%TEMP%\ClipboardManagerTests`.
-5. When the look of the popup changes, run `tests\New-DocsScreenshots.ps1` (same rules: ask first) and check the
+3. When the look of the popup changes, run `tests\New-DocsScreenshots.ps1` (same rules: ask first) and check the
    new `docs\*.png` before committing them.
 
 ## Git

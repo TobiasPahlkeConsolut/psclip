@@ -214,16 +214,18 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
 
 | File                   | Content                                                                      |
 | ---------------------- | ---------------------------------------------------------------------------- |
-| `ClipboardManager.ps1` | The app: clipboard history, popup, tray icon, hotkey, keep awake             |
-| `PsClip.cs`            | C# helpers for Windows APIs PowerShell cannot call directly                  |
+| `ClipboardManager.ps1` | The app's entry point: help, parameters, settings, startup                   |
+| `src/*.ps1`            | The app's functions by topic: hotkey, history, popup, theme, OCR, keep awake, windows |
+| `src/*.cs`             | C# helpers for Windows APIs PowerShell cannot call directly                  |
 | `Install.ps1`          | Start menu / autostart shortcuts                                             |
 | `tests/`               | Unit tests and the end-to-end test                                           |
 
-At startup, `ClipboardManager.ps1` compiles `PsClip.cs` (`Add-Type`): a hidden window receives clipboard-change
-notifications (`AddClipboardFormatListener`) and the global hotkey (`RegisterHotKey`). Each entry keeps the text plus
-its HTML and RTF formatting in memory, images are kept PNG-compressed. Text in images is recognized with
-`Windows.Media.Ocr`, called through WinRT from PowerShell, in the background. Pasting puts the entry back on the clipboard, brings the previous window to
-the front and sends `Ctrl+V`. The popup, tray icon and dialogs are Windows Forms. Everything else is PowerShell.
+At startup, `ClipboardManager.ps1` loads the files in `src` and compiles the C# helpers (`Add-Type`): a hidden window
+receives clipboard-change notifications (`AddClipboardFormatListener`) and the global hotkey (`RegisterHotKey`).
+Each entry keeps the text plus its HTML and RTF formatting in memory, images are kept PNG-compressed. Text in images
+is recognized with `Windows.Media.Ocr`, called through WinRT from PowerShell, in the background. Pasting puts the
+entry back on the clipboard, brings the previous window to the front and sends `Ctrl+V`. The popup, tray icon and
+dialogs are Windows Forms. Everything else is PowerShell.
 
 ## Development
 

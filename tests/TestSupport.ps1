@@ -46,7 +46,8 @@ public static class TestNative
         public Rect CaretRect;
     }
 
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr FindWindow(string cls, string title);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hwnd);
@@ -55,7 +56,8 @@ public static class TestNative
     [DllImport("user32.dll")] public static extern bool RegisterHotKey(IntPtr hwnd, int id, uint modifiers, uint vk);
     [DllImport("user32.dll")] public static extern bool UnregisterHotKey(IntPtr hwnd, int id);
     [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint code, uint mapType);
-    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")]
+    public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr hwnd);
     [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr hwnd);
     [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
@@ -65,13 +67,18 @@ public static class TestNative
     [DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint threadId, ref GuiThreadInfo info);
     [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out Rect rect);
     [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr hwnd, out Rect rect);
-    [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect value, int size);
+    [DllImport("dwmapi.dll")]
+    static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out Rect value, int size);
     [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
     [DllImport("user32.dll")] static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr lParam);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, StringBuilder lParam);
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, string lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetClassName(IntPtr hwnd, StringBuilder name, int max);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern int GetWindowText(IntPtr hwnd, StringBuilder text, int max);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, StringBuilder lParam);
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, string lParam);
     [DllImport("user32.dll")] static extern IntPtr SendMessage(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam);
 
     public static uint ProcessOf(IntPtr hwnd)
@@ -471,7 +478,9 @@ function Save-Clipboard {
     $data = [Clipboard]::GetDataObject()
     if ($null -eq $data) { return $saved }
 
-    if ($data.GetDataPresent([DataFormats]::UnicodeText)) { $saved.Text = [string]$data.GetData([DataFormats]::UnicodeText) }
+    if ($data.GetDataPresent([DataFormats]::UnicodeText)) {
+        $saved.Text = [string]$data.GetData([DataFormats]::UnicodeText)
+    }
     if ($data.GetDataPresent([DataFormats]::Bitmap)) { $saved.Image = [Clipboard]::GetImage() }
     if ($data.GetDataPresent([DataFormats]::FileDrop)) { $saved.Files = [Clipboard]::GetFileDropList() }
     $saved.Private = $data.GetDataPresent('ExcludeClipboardContentFromMonitorProcessing') -or
@@ -502,7 +511,9 @@ function Restore-Clipboard {
     }
     if ($Saved.Private) {
         # Keep it out of clipboard histories again (Win+V, cloud clipboard, psclip itself).
-        foreach ($format in 'ExcludeClipboardContentFromMonitorProcessing', 'CanIncludeInClipboardHistory', 'CanUploadToCloudClipboard') {
+        $privateFormats = 'ExcludeClipboardContentFromMonitorProcessing', 'CanIncludeInClipboardHistory',
+            'CanUploadToCloudClipboard'
+        foreach ($format in $privateFormats) {
             $data.SetData($format, $false, [System.IO.MemoryStream]::new([byte[]](0, 0, 0, 0)))
         }
     }

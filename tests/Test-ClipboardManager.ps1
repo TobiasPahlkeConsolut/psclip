@@ -96,16 +96,20 @@ try {
     if (-not $started) { throw "The manager did not start, see $log and $errorLog" }
     $hostWindow = Find-ManagerWindow $instanceName
     $popup = Find-ManagerWindow 'Clipboard history'
-    Add-Result "Hotkey $($testHotkey.Text) registered" (-not (Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey))
+    $hotkeyTaken = -not (Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey)
+    Add-Result "Hotkey $($testHotkey.Text) registered" $hotkeyTaken
 
     # --- clipboard capture ---
-    foreach ($text in 'psclip test: alpha', "psclip test: beta line one`r`nline two", 'psclip test: gamma & <special> chars', 'psclip test: alpha') {
+    $samples = 'psclip test: alpha', "psclip test: beta line one`r`nline two", 'psclip test: gamma & <special> chars',
+        'psclip test: alpha'
+    foreach ($text in $samples) {
         Set-Clipboard -Value $text
         Wait-Milliseconds 300
     }
     $private = [DataObject]::new()
     $private.SetText('SECRET-PASSWORD')
-    $private.SetData('ExcludeClipboardContentFromMonitorProcessing', $false, [System.IO.MemoryStream]::new([byte[]](0, 0, 0, 0)))
+    $private.SetData('ExcludeClipboardContentFromMonitorProcessing', $false,
+        [System.IO.MemoryStream]::new([byte[]](0, 0, 0, 0)))
     [Clipboard]::SetDataObject($private, $true)
     Wait-Milliseconds 400
 
@@ -204,7 +208,9 @@ try {
     $testImage = [System.Drawing.Bitmap]::new(400, 100)
     $graphics = [System.Drawing.Graphics]::FromImage($testImage)
     $graphics.Clear([System.Drawing.Color]::White)
-    $graphics.DrawString('psclip test image 4711', [System.Drawing.Font]::new('Segoe UI', 20), [System.Drawing.Brushes]::Black, 10, 25)
+    $imageFont = [System.Drawing.Font]::new('Segoe UI', 20)
+    $graphics.DrawString('psclip test image 4711', $imageFont, [System.Drawing.Brushes]::Black, 10, 25)
+    $imageFont.Dispose()
     $graphics.Dispose()
     [Clipboard]::SetImage($testImage)
     # Text recognition runs in the background; the manager logs when it is done.
@@ -242,7 +248,8 @@ try {
 
     # --- preview (F3): full text or image of the selected entry; the popup grows by it ---
     $keyF3 = 0x72
-    $heightBefore = $heightWith = $heightAfter = $textHeight = $draggedHeight = $reopenedHeight = $reopenedTextHeight = -1
+    $heightBefore = $heightWith = $heightAfter = $textHeight = $draggedHeight = -1
+    $reopenedHeight = $reopenedTextHeight = -1
     $imageTextHeight = $imageTextDragged = $reopenedImageTextHeight = $barBottom = $previewTop = -1
     $dragged = $textDragged = $false
     $previewText = $imageInfo = $copied = ''
@@ -258,7 +265,8 @@ try {
 
         Send-PostedKey $searchBox $keyDown   # the image, pasted last
         Wait-Milliseconds 400
-        $imageInfo = [TestNative]::ChildTexts($popup, 'STATIC') | Where-Object { $_ -like 'Image *' } | Select-Object -First 1
+        $imageInfo = [TestNative]::ChildTexts($popup, 'STATIC') | Where-Object { $_ -like 'Image *' } |
+            Select-Object -First 1
         Save-WindowImage $popup "popup-preview-image-$Theme.png"
 
         # Drag the bar between the image and its recognized text 40 px up with the mouse: the text
@@ -343,8 +351,10 @@ try {
             Hide-TestPopup
         }
     }
-    Add-Result 'Popup opens at the medium size' ($openedHeight -eq $mediumHeight) "client height $openedHeight, expected $mediumHeight"
-    Add-Result 'Manual resizing is reset on the next opening' ($resizedHeight -gt $openedHeight -and $reopenedHeight -eq $openedHeight) `
+    Add-Result 'Popup opens at the medium size' ($openedHeight -eq $mediumHeight) `
+        "client height $openedHeight, expected $mediumHeight"
+    Add-Result 'Manual resizing is reset on the next opening' `
+        ($resizedHeight -gt $openedHeight -and $reopenedHeight -eq $openedHeight) `
         "resized $resizedHeight, reopened $reopenedHeight"
 
     # --- tray menu: Window size > Large ---
@@ -360,7 +370,8 @@ try {
         $openedHeight = [TestNative]::ClientHeightOf($popup)
         Hide-TestPopup
     }
-    Add-Result 'Tray menu: window size Large' ($openedHeight -eq $largeHeight) "client height $openedHeight, expected $largeHeight"
+    Add-Result 'Tray menu: window size Large' ($openedHeight -eq $largeHeight) `
+        "client height $openedHeight, expected $largeHeight"
 
     # --- tray menu: Change hotkey dialog ---
     $dialog = [IntPtr]::Zero
@@ -391,7 +402,8 @@ try {
         $newTaken = -not (Test-HotkeyFree 0x7 0x78)
         $oldFree = Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey
         if ($newTaken) { $script:currentHotkeyKeys = 0x11, 0x12, 0x10, 0x78 }   # Ctrl, Alt, Shift, F9
-        Add-Result 'New hotkey registered, old one released' ($newTaken -and $oldFree) "new taken: $newTaken, old free: $oldFree"
+        Add-Result 'New hotkey registered, old one released' ($newTaken -and $oldFree) `
+            "new taken: $newTaken, old free: $oldFree"
     }
 
     # --- tray menu: Dark mode switches the theme ---
@@ -410,7 +422,9 @@ try {
     }
     $isDark = { param($brightness) $brightness -ge 0 -and $brightness -lt 100 }
     $isLight = { param($brightness) $brightness -gt 150 }
-    $switched = if ($Theme -eq 'Dark') { (& $isDark $before) -and (& $isLight $after) } else { (& $isLight $before) -and (& $isDark $after) }
+    $darkToLight = (& $isDark $before) -and (& $isLight $after)
+    $lightToDark = (& $isLight $before) -and (& $isDark $after)
+    $switched = if ($Theme -eq 'Dark') { $darkToLight } else { $lightToDark }
     Add-Result 'Tray menu: dark mode switches the theme' $switched "brightness before $before, after $after"
 
     # --- tray menu: Keep awake (presses F15 after $keepAwakeSeconds s without input) ---
