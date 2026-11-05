@@ -171,6 +171,68 @@ public static class TestNative
         return found;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    public struct Point { public int X, Y; }
+
+    [DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
+    [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+    [DllImport("user32.dll")] static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extraInfo);
+
+    // Drags with the real mouse from the middle of the window by deltaY pixels - only if that
+    // point is really on the window (nothing else gets clicked). Puts the cursor back afterwards.
+    // Returns false if it did not drag.
+    public static bool DragWindow(IntPtr hwnd, int deltaY)
+    {
+        Point original;
+        GetCursorPos(out original);
+        Rect rect;
+        GetWindowRect(hwnd, out rect);
+        Point start = new Point();
+        start.X = (rect.Left + rect.Right) / 2;
+        start.Y = (rect.Top + rect.Bottom) / 2;
+        try
+        {
+            SetCursorPos(start.X, start.Y);
+            System.Threading.Thread.Sleep(50);
+            if (WindowFromPoint(start) != hwnd) return false;
+
+            mouse_event(0x0002 /* LEFTDOWN */, 0, 0, 0, UIntPtr.Zero);
+            System.Threading.Thread.Sleep(50);
+            for (int step = 1; step <= 8; step++)
+            {
+                SetCursorPos(start.X, start.Y + deltaY * step / 8);
+                System.Threading.Thread.Sleep(25);
+            }
+            mouse_event(0x0004 /* LEFTUP */, 0, 0, 0, UIntPtr.Zero);
+            System.Threading.Thread.Sleep(50);
+            return true;
+        }
+        finally
+        {
+            SetCursorPos(original.X, original.Y);
+        }
+    }
+
+    public static IntPtr ChildByTitle(IntPtr parent, string title)
+    {
+        IntPtr found = IntPtr.Zero;
+        EnumChildWindows(parent, delegate (IntPtr hwnd, IntPtr unused)
+        {
+            if (TitleOf(hwnd) != title) return true;
+            found = hwnd;
+            return false;
+        }, IntPtr.Zero);
+        return found;
+    }
+
+    // Selects characters in an edit control and copies them to the clipboard (EM_SETSEL, WM_COPY).
+    public static void CopyTextRange(IntPtr edit, int start, int end)
+    {
+        SendMessage(edit, 0x00B1, new IntPtr(start), new IntPtr(end));
+        SendMessage(edit, 0x0301, IntPtr.Zero, IntPtr.Zero);
+    }
+
     // Texts of all child windows whose class contains classPart (e.g. the labels: "STATIC").
     public static List<string> ChildTexts(IntPtr parent, string classPart)
     {
@@ -294,6 +356,7 @@ function Get-WindowBrightness {
     # Brightness (0-255) of a point in the lower right of the popup, inside the empty list area.
     param([IntPtr]$Window)
 
+    Wait-Milliseconds 300   # a window that just appeared may not have painted itself yet (white)
     $rect = [TestNative]::RectOf($Window)
     $bitmap = [System.Drawing.Bitmap]::new(1, 1)
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
@@ -302,6 +365,12 @@ function Get-WindowBrightness {
     $brightness = [int]($bitmap.GetPixel(0, 0).GetBrightness() * 255)
     $bitmap.Dispose()
     $brightness
+}
+
+function Get-WindowHeight {
+    param([IntPtr]$Window)
+    $rect = [TestNative]::RectOf($Window)
+    $rect.Bottom - $rect.Top
 }
 
 function Send-PostedKey {

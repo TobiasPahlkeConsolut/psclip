@@ -19,7 +19,8 @@ The history lives in memory only and is gone when the script exits.
 - **Images** too, e.g. screenshots: shown with a thumbnail; the last 20 are kept
 - **Search text in images**: the text in an image is recognized in the background (Windows' built-in OCR, offline),
   so typing a word from a screenshot finds it; typing `image` lists all images
-- **Preview** (`F3`) of the selected entry below the list: the full text or the image
+- **Preview** (`F3`) of the selected entry below the list: the full text or the image with its recognized text -
+  select and copy any part of it; drag the top edge to make the preview bigger
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"
 - **Dark mode** (default) or light mode, switchable from the tray menu
 - **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
@@ -118,8 +119,12 @@ text:
 <img src="docs/search-image-dark.png" alt="Searching for 'timed out' finds a screenshot of an error message; the preview shows the image and the recognized text" width="60%">
 
 Right-click an entry for the same actions (*Paste as plain text* appears for entries with formatting). You can resize
-the popup while it is open; the next time it opens at the chosen size again. The preview makes the popup taller and
-stays on or off until psclip exits (`-Preview` to start with it).
+the popup while it is open; the next time it opens at the chosen size again.
+
+The preview makes the popup taller. Drag the bar on its top edge to make it bigger, and the bar between an image and
+its recognized text to give either more room. Click into the preview to select text and copy it (`Ctrl+C`, `Ctrl+A`
+or right-click), e.g. a number from a screenshot; typing a character goes back to the filter. Every time the popup
+opens, the preview is hidden again and has its default size (`-Preview` opens the popup with it).
 
 The **tray icon** (a small blue clipboard, possibly in the `^` overflow area of the taskbar):
 
@@ -157,7 +162,7 @@ windows). Windows then never sees the session as idle. While you are working, no
 | `-MaxItems`         | `200`    | Unpinned entries to keep                                                    |
 | `-MaxEntryLength`   | `1000000`| Texts with more characters are not recorded                                 |
 | `-MaxImages`        | `20`     | Unpinned images to keep (they need much more memory than text); `0` = none  |
-| `-Preview`          | off      | Start with the preview (`F3`) shown                                         |
+| `-Preview`          | off      | Open the popup with the preview (`F3`) shown                                |
 | `-KeepAwake`        | off      | Start with *Keep awake* switched on                                         |
 | `-KeepAwakeSeconds` | `30`     | Idle seconds before *Keep awake* presses F15                                |
 | `-InstanceName`     | `PsClipboardManager` | Only to run a second, separate instance (the end-to-end test does)  |

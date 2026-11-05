@@ -21,7 +21,10 @@
         Shift+Delete          remove the entry
         Esc                   close
 
-    Right-click an entry for the same actions. Left-click the tray icon to open the history
+    Right-click an entry for the same actions. In the preview, text can be selected and copied
+    (also the text recognized in an image); drag the bar on its top edge to make it bigger, or
+    the bar between an image and its text. Sizes and F3 are reset when the popup opens again.
+    Left-click the tray icon to open the history
     in copy-only mode; right-click it for "Clear history", the settings (hotkey, dark mode,
     window size) and "Exit". Settings changed there last until the script exits.
 
@@ -63,7 +66,8 @@
     changes it.
 
 .PARAMETER Preview
-    Start with the preview shown (F3 switches it).
+    Open the popup with the preview shown. F3 switches it while the popup is open; the next time
+    the popup opens, it starts this way again.
 
 .PARAMETER KeepAwake
     Start with "Keep awake" switched on (it can be switched in the tray menu).
@@ -179,6 +183,7 @@ $PopupSizes = @{
 
 # Height of the preview (F3) at 100 % display scaling; the popup grows by it
 $PreviewHeight = 220
+$PreviewTextShare = 0.3      # part of the preview for the text recognized in an image (below the image)
 $MaxPreviewLength = 100000   # characters shown in the preview
 
 # Images larger than this are not recorded
@@ -745,7 +750,12 @@ function Show-Popup {
     }
 
     Set-Theme (Test-DarkTheme)
+    $State.PreviewVisible = $State.PreviewDefault   # F3 is not remembered from the last time
     $Ui.Preview.Visible = $State.PreviewVisible
+    $Ui.PreviewSplitter.Visible = $State.PreviewVisible
+    # Sizes dragged with the bars last until the popup closes.
+    $Ui.Preview.Height = [int]($PreviewHeight * $Ui.Scale)
+    $State.PreviewTextShare = $PreviewTextShare
     Reset-PopupSize
     if ($Ui.Search.Text) {
         $Ui.Search.Text = ''   # TextChanged refreshes the list
@@ -773,7 +783,7 @@ function Reset-PopupSize {
     # hand lasts until it closes.
     $logicalSize = $PopupSizes[$State.PopupSize]
     $height = [int]($logicalSize.Height * $Ui.Scale)
-    if ($State.PreviewVisible) { $height += $Ui.Preview.Height }
+    if ($State.PreviewVisible) { $height += $Ui.Preview.Height + $Ui.PreviewSplitter.Height }
     $Ui.Form.ClientSize = [Size]::new([int]($logicalSize.Width * $Ui.Scale), $height)
 }
 
@@ -790,8 +800,9 @@ function Switch-Preview {
     # F3: shows or hides the preview below the list; the popup grows or shrinks by its height.
     $State.PreviewVisible = -not $State.PreviewVisible
     $Ui.Preview.Visible = $State.PreviewVisible
-    $delta = if ($State.PreviewVisible) { $Ui.Preview.Height } else { -$Ui.Preview.Height }
-    $Ui.Form.Height += $delta
+    $Ui.PreviewSplitter.Visible = $State.PreviewVisible
+    $extra = $Ui.Preview.Height + $Ui.PreviewSplitter.Height
+    $Ui.Form.Height += if ($State.PreviewVisible) { $extra } else { -$extra }
     Move-PopupIntoScreen
     Update-Preview
 }
@@ -812,17 +823,37 @@ function Update-Preview {
         $hasText = -not [string]::IsNullOrEmpty($entry.OcrText)
         if ($hasText) {
             $Ui.PreviewText.Dock = 'Bottom'
-            $Ui.PreviewText.Height = [int]($Ui.Preview.Height * 0.3)
+            Update-PreviewTextHeight
             $Ui.PreviewText.Text = $entry.OcrText
         }
         $Ui.PreviewText.Visible = $hasText
+        $Ui.PreviewTextSplitter.Visible = $hasText
     }
     else {
         $Ui.PreviewText.Dock = 'Fill'
         $Ui.PreviewText.Text = Get-PreviewText $entry
         $Ui.PreviewText.Visible = $true
+        $Ui.PreviewTextSplitter.Visible = $false
         $Ui.PreviewImage.Visible = $false
     }
+}
+
+function Get-PreviewTextSpace {
+    # Height below the info line that an image, the bar and the recognized text share
+    $Ui.Preview.DisplayRectangle.Height - $Ui.PreviewInfo.Height - $Ui.PreviewTextSplitter.Height
+}
+
+function Update-PreviewTextHeight {
+    # Below an image, the recognized text keeps its share of the space ($State.PreviewTextShare) -
+    # also when the whole preview is resized.
+    if ($Ui.PreviewText.Dock -ne 'Bottom') { return }
+    $Ui.PreviewText.Height = [Math]::Max(0, [int]((Get-PreviewTextSpace) * $State.PreviewTextShare))
+}
+
+function Save-PreviewTextShare {
+    # After the bar between image and text was dragged: keep the text's new share (until the popup closes).
+    $space = Get-PreviewTextSpace
+    if ($space -gt 0) { $State.PreviewTextShare = [Math]::Min(1.0, $Ui.PreviewText.Height / $space) }
 }
 
 function Clear-Preview {
@@ -1196,12 +1227,14 @@ function Set-Theme {
     $Ui.PreviewText.BackColor = $colors.Input
     $Ui.PreviewText.ForeColor = $colors.Text
     $Ui.PreviewImage.BackColor = $colors.Input
+    $Ui.PreviewSplitter.BackColor = $colors.Border
+    $Ui.PreviewTextSplitter.BackColor = $colors.Border
     [PsClip.Native]::SetDarkTitleBar($Ui.Form.Handle, $Dark)
     [PsClip.Native]::SetDarkControlTheme($Ui.List.Handle, $Dark)
     [PsClip.Native]::SetDarkControlTheme($Ui.PreviewText.Handle, $Dark)
 
     # Submenus are separate drop-downs and need their own renderer.
-    foreach ($menu in $Ui.TrayMenu, $Ui.SizeMenuItem.DropDown, $Ui.ListMenu) {
+    foreach ($menu in $Ui.TrayMenu, $Ui.SizeMenuItem.DropDown, $Ui.ListMenu, $Ui.PreviewMenu) {
         $menu.Renderer = [PsClip.MenuRenderer]::new($colors.Back, $colors.Hover, $colors.Border, $colors.Text)
         $menu.BackColor = $colors.Back
         $menu.ForeColor = $colors.Text
@@ -1387,6 +1420,19 @@ function Initialize-Ui {
     $Ui.Padding = [int](8 * $Ui.Scale)
 }
 
+function Initialize-ControlHandles {
+    # Creates the windows of all child controls, in the order of their Controls collections.
+    # WinForms creates the window of a hidden control only when it is first shown, and then moves
+    # the control in its parent's collection to match the window order - which is also the docking
+    # order. The preview (hidden at first) would end up above its drag bar.
+    param([Control]$Parent)
+
+    foreach ($child in @($Parent.Controls)) {
+        [void]$child.Handle
+        Initialize-ControlHandles $child
+    }
+}
+
 function New-PopupWindow {
     $scale = $Ui.Scale
 
@@ -1442,6 +1488,7 @@ function New-PopupWindow {
     $previewInfo.Height = [int]($Ui.SmallFont.Height * 1.7)
     $previewInfo.TextAlign = 'MiddleLeft'
 
+    # Text can be selected and copied (Ctrl+C, context menu), e.g. a part of the text recognized in an image.
     $previewText = [TextBox]::new()
     $previewText.Dock = 'Fill'
     $previewText.Multiline = $true
@@ -1450,21 +1497,46 @@ function New-PopupWindow {
     $previewText.ScrollBars = 'Vertical'
     $previewText.BorderStyle = 'None'
     $previewText.TabStop = $false
+    $previewText.HideSelection = $false
+    $previewText.ContextMenuStrip = New-PreviewMenu
 
     $previewImage = [PictureBox]::new()
     $previewImage.Dock = 'Fill'
     $previewImage.SizeMode = 'Zoom'
     $previewImage.Visible = $false
 
-    # Docking runs in reverse order: info at the top, then the text (Fill for text entries,
-    # Bottom below an image), then the image fills the rest.
+    # Drag bars: one at the top edge of the preview resizes the whole preview, one between an image
+    # and its recognized text divides the preview between them (both until the popup closes). A
+    # splitter resizes the control on its far side (for Dock Bottom: the one directly below it).
+    # Their window texts let tests and accessibility tools find them.
+    $previewTextSplitter = [Splitter]::new()
+    $previewTextSplitter.Dock = 'Bottom'
+    $previewTextSplitter.Height = [int](5 * $scale)
+    $previewTextSplitter.MinSize = [int](20 * $scale)     # smallest text
+    $previewTextSplitter.MinExtra = [int](30 * $scale)    # smallest image
+    $previewTextSplitter.Text = 'Preview text size'
+    $previewTextSplitter.Visible = $false
+
+    $previewSplitter = [Splitter]::new()
+    $previewSplitter.Dock = 'Bottom'
+    $previewSplitter.Height = [int](5 * $scale)
+    $previewSplitter.MinSize = [int](60 * $scale)         # smallest preview
+    $previewSplitter.MinExtra = $list.ItemHeight * 2      # the list keeps at least two rows
+    $previewSplitter.Text = 'Preview size'
+    $previewSplitter.Visible = $State.PreviewVisible
+
+    # Docking runs in reverse order of adding: info at the top, then the text (Fill for text
+    # entries, Bottom below an image), the bar above it, and the image fills the rest.
     $preview.Controls.Add($previewImage)
+    $preview.Controls.Add($previewTextSplitter)
     $preview.Controls.Add($previewText)
     $preview.Controls.Add($previewInfo)
 
-    # Docking is applied in reverse order: the Fill control has to be added first.
+    # Same here: status line at the bottom, the preview above it, its bar above the preview, the
+    # search box at the top; the list (Fill, added first) takes the rest.
     $form.Controls.Add($list)
     $form.Controls.Add($searchPanel)
+    $form.Controls.Add($previewSplitter)
     $form.Controls.Add($preview)
     $form.Controls.Add($status)
 
@@ -1477,16 +1549,43 @@ function New-PopupWindow {
     $Ui.PreviewInfo = $previewInfo
     $Ui.PreviewText = $previewText
     $Ui.PreviewImage = $previewImage
+    $Ui.PreviewSplitter = $previewSplitter
+    $Ui.PreviewTextSplitter = $previewTextSplitter
     Reset-PopupSize
 
     [void]$form.Handle   # create the window now so that BeginInvoke works before the first Show
+    Initialize-ControlHandles $form
     [PsClip.Native]::SetCueBanner($search.Handle, 'Type to filter...')
 
     # Event handlers run after this function has returned: use $Ui / $State, not local variables.
     $search.add_TextChanged({ Update-PopupList })
     $list.add_SelectedIndexChanged({ Update-Preview })
     $form.add_Resize({ if ($Ui.Form.Visible) { Update-StatusText } })
-    $previewText.add_MouseUp({ [void]$Ui.Search.Focus() })   # scrolling the preview, typing still filters
+    $preview.add_Resize({ Update-PreviewTextHeight })
+    # The splitter sets the preview's bounds while the form is laying out; the preview's own
+    # content (text, image) is only arranged again when asked explicitly.
+    $previewSplitter.add_SplitterMoved({
+        Update-PreviewTextHeight
+        $Ui.Preview.PerformLayout()
+    })
+    $previewTextSplitter.add_SplitterMoved({ Save-PreviewTextShare })
+    $previewText.add_KeyDown({
+        param($source, $e)
+        # Ctrl+A selects all (multi-line text boxes do not do that by themselves); Ctrl+C copies natively.
+        if ($e.Control -and $e.KeyCode -eq [Keys]::A) {
+            $Ui.PreviewText.SelectAll()
+            $e.SuppressKeyPress = $true
+        }
+    })
+    $previewText.add_KeyPress({
+        param($source, $e)
+        # Typing a character continues in the filter box.
+        if (-not [char]::IsControl($e.KeyChar)) {
+            [void]$Ui.Search.Focus()
+            $Ui.Search.AppendText([string]$e.KeyChar)
+            $e.Handled = $true
+        }
+    })
     $list.add_DrawItem({
         param($source, $e)
         Write-ListItem $e
@@ -1570,6 +1669,23 @@ function New-ListMenu {
     })
 
     $Ui.ListMenu = $menu
+    return $menu
+}
+
+function New-PreviewMenu {
+    # Context menu of the preview text: copy a part of it, e.g. of the text recognized in an image.
+    $menu = [ContextMenuStrip]::new()
+
+    $Ui.PreviewMenuCopy = $menu.Items.Add('Copy')
+    $Ui.PreviewMenuCopy.ShortcutKeyDisplayString = 'Ctrl+C'
+    $Ui.PreviewMenuCopy.add_Click({ $Ui.PreviewText.Copy() })
+
+    $selectAll = $menu.Items.Add('Select all')
+    $selectAll.ShortcutKeyDisplayString = 'Ctrl+A'
+    $selectAll.add_Click({ $Ui.PreviewText.SelectAll() })
+
+    $menu.add_Opening({ $Ui.PreviewMenuCopy.Enabled = $Ui.PreviewText.SelectionLength -gt 0 })
+    $Ui.PreviewMenu = $menu
     return $menu
 }
 
@@ -1710,7 +1826,9 @@ $State = @{
     HotkeyActive         = $false
     ThemeSetting         = $Theme                # Dark, Light or Auto; the tray menu switches it
     PopupSize            = $Size                 # S, M or L; the tray menu changes it
-    PreviewVisible       = $Preview.IsPresent    # F3 switches it
+    PreviewVisible       = $Preview.IsPresent    # F3 switches it while the popup is open
+    PreviewDefault       = $Preview.IsPresent    # how the popup opens
+    PreviewTextShare     = $PreviewTextShare     # text below an image; the bar between them changes it
     KeepAwake            = $false                # the tray menu switches it
     OcrQueue             = [Queue[PsClip.ClipEntry]]::new()   # images waiting for text recognition
     OcrJob               = $null                 # the recognition in progress

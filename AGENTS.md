@@ -98,7 +98,15 @@ history, Popup, Theme, Text in images (OCR), Keep awake, Window construction, Ma
   chosen by whoever put them on the clipboard (another program, an RDP session). `GetDataPresent()` is safe.
 - The popup is resized to the configured size (`$PopupSizes`, `-Size`) every time it opens (`Reset-PopupSize`);
   manual resizing is intentionally temporary. The preview (`F3`, `$Ui.Preview`) is a bottom-docked panel; showing
-  it makes the popup taller by its height (`Switch-Preview`, `Move-PopupIntoScreen`).
+  it makes the popup taller by its height (`Switch-Preview`, `Move-PopupIntoScreen`). Each opening resets it:
+  hidden unless `-Preview` (`$State.PreviewDefault`), default height, default text share below an image.
+- The preview's drag bars are `Splitter`s: `$Ui.PreviewSplitter` on the preview's top edge (resizes the whole
+  preview) and `$Ui.PreviewTextSplitter` between an image and its recognized text (`$State.PreviewTextShare`,
+  applied by `Update-PreviewTextHeight` whenever the preview is resized). A bottom-docked splitter resizes the
+  control directly below it. Docking follows the order of the `Controls` collection (last added = docked first),
+  and WinForms re-sorts a hidden control in that collection when its window is created later, at the first show -
+  so `New-PopupWindow` creates all windows up front (`Initialize-ControlHandles`). The end-to-end test drags both
+  bars with the real mouse.
 - `Hide-Popup` empties the list and the preview: hidden controls can still be read by other programs
   (`LB_GETTEXT`, `WM_GETTEXT`), so no history content stays in them while the popup is closed.
 - `Update-StatusText` drops the last key hints until the line fits the popup's width.

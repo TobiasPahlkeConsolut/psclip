@@ -33,7 +33,7 @@
     Passed on to ClipboardManager.ps1: popup size S, M (default) or L.
 
 .PARAMETER Preview
-    Passed on to ClipboardManager.ps1: start with the preview (F3) shown.
+    Passed on to ClipboardManager.ps1: open the popup with the preview (F3) shown.
 
 .PARAMETER KeepAwake
     Passed on to ClipboardManager.ps1: start with "Keep awake" switched on.

@@ -242,20 +242,63 @@ try {
 
     # --- preview (F3): full text or image of the selected entry; the popup grows by it ---
     $keyF3 = 0x72
-    $heightBefore = $heightWith = $heightAfter = -1
-    $previewText = $imageInfo = ''
+    $heightBefore = $heightWith = $heightAfter = $textHeight = $draggedHeight = $reopenedHeight = $reopenedTextHeight = -1
+    $imageTextHeight = $imageTextDragged = $reopenedImageTextHeight = $barBottom = $previewTop = -1
+    $dragged = $textDragged = $false
+    $previewText = $imageInfo = $copied = ''
     if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
         $heightBefore = [TestNative]::ClientHeightOf($popup)
         Send-PostedKey $searchBox $keyF3
         Wait-Milliseconds 400
         $heightWith = [TestNative]::ClientHeightOf($popup)
-        $previewText = [TestNative]::TextOf([TestNative]::EditBox($popup, $true))   # the pinned entry
+        $previewBox = [TestNative]::EditBox($popup, $true)
+        $previewText = [TestNative]::TextOf($previewBox)   # the pinned entry
+        $textHeight = Get-WindowHeight $previewBox
         Save-WindowImage $popup "popup-preview-$Theme.png"
 
         Send-PostedKey $searchBox $keyDown   # the image, pasted last
         Wait-Milliseconds 400
         $imageInfo = [TestNative]::ChildTexts($popup, 'STATIC') | Where-Object { $_ -like 'Image *' } | Select-Object -First 1
         Save-WindowImage $popup "popup-preview-image-$Theme.png"
+
+        # Drag the bar between the image and its recognized text 40 px up with the mouse: the text
+        # gets more room. Splitters evaluate the real mouse state, so posted mouse messages would not do.
+        $imageTextHeight = Get-WindowHeight $previewBox
+        $textBar = [TestNative]::ChildByTitle($popup, 'Preview text size')
+        $textDragged = (Test-Foreground $popup) -and [TestNative]::DragWindow($textBar, [int](-40 * $scale))
+        Wait-Milliseconds 400
+        $imageTextDragged = Get-WindowHeight $previewBox
+
+        # Copy a part of the text recognized in the image
+        [TestNative]::CopyTextRange($previewBox, 0, 6)
+        [void](Wait-Until { (Get-Clipboard -Raw) -eq 'psclip' } 2000)
+        $copied = Get-Clipboard -Raw
+
+        # Drag the bar at the top edge of the preview 80 px up: the whole preview grows.
+        Send-PostedKey $searchBox $keyUp     # the text entry again: its text fills the preview
+        Wait-Milliseconds 400
+        $previewBar = [TestNative]::ChildByTitle($popup, 'Preview size')
+        $dragged = (Test-Foreground $popup) -and [TestNative]::DragWindow($previewBar, [int](-80 * $scale))
+        Wait-Milliseconds 400
+        $draggedHeight = Get-WindowHeight $previewBox
+        $barBottom = [TestNative]::RectOf($previewBar).Bottom
+        $previewTop = [TestNative]::RectOf($previewBox).Top
+        Save-WindowImage $popup "popup-preview-dragged-$Theme.png"
+
+        # Opened again: without the preview (F3 is not remembered); shown again, it has its default
+        # size, and so has the text below an image.
+        if (Show-TestPopup) {
+            Wait-Milliseconds 200
+            $reopenedHeight = [TestNative]::ClientHeightOf($popup)
+            Send-PostedKey $searchBox $keyF3
+            Wait-Milliseconds 400
+            $reopenedTextHeight = Get-WindowHeight $previewBox
+            foreach ($char in 'image'.ToCharArray()) {
+                [void][TestNative]::PostMessage($searchBox, [TestNative]::WM_CHAR, [IntPtr][int]$char, [IntPtr]::Zero)
+            }
+            Wait-Milliseconds 400
+            $reopenedImageTextHeight = Get-WindowHeight $previewBox
+        }
 
         Send-PostedKey $searchBox $keyF3
         Wait-Milliseconds 400
@@ -267,6 +310,20 @@ try {
     Add-Result 'The preview shows the full text' ($previewText -ceq "psclip test: beta line one`r`nline two") `
         ($previewText -replace "`r`n", ' | ')
     Add-Result 'The preview describes an image' ($imageInfo -like 'Image 400 * 100 *') "$imageInfo"
+    Add-Result 'Dragging the bar between image and text gives the text more room' `
+        ($imageTextDragged -gt $imageTextHeight + 20 -and $imageTextHeight -gt 0) `
+        "text height $imageTextHeight -> $imageTextDragged (dragged: $textDragged)"
+    Add-Result 'Recognized text can be selected and copied' ($copied -ceq 'psclip') "clipboard: '$copied'"
+    Add-Result 'Dragging the top edge of the preview makes it bigger' ($draggedHeight -gt $textHeight + 40) `
+        "text height $textHeight -> $draggedHeight (dragged: $dragged)"
+    Add-Result 'The bar sits on the top edge of the preview' ($barBottom -gt 0 -and $barBottom -le $previewTop) `
+        "bar bottom $barBottom, preview text top $previewTop"
+    Add-Result 'The preview is not remembered when the popup opens again' ($reopenedHeight -eq $heightBefore) `
+        "height $reopenedHeight"
+    Add-Result 'Shown again, the preview has its default size' ($reopenedTextHeight -eq $textHeight) `
+        "text height $reopenedTextHeight"
+    Add-Result 'Shown again, the text below an image has its default size' `
+        ($reopenedImageTextHeight -eq $imageTextHeight) "text height $reopenedImageTextHeight"
     Add-Result 'F3 hides the preview again' ($heightAfter -eq $heightBefore) "height $heightAfter"
 
     # --- popup size: medium by default, manual resizing is reset on the next opening ---

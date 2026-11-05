@@ -30,6 +30,7 @@ function Reset-TestState {
         ThemeSetting        = 'Dark'
         PopupSize           = 'M'
         PreviewVisible      = $false
+        PreviewTextShare    = 0.3
         KeepAwake           = $false
         OcrQueue            = [System.Collections.Generic.Queue[PsClip.ClipEntry]]::new()
         OcrJob              = $null
@@ -800,6 +801,68 @@ Describe 'Preview' {
         $text = Get-PreviewText ([PsClip.ClipEntry]::new('x' * 25))
         $text | Should Match ('^x{10}\r\n\.\.\.  \(15 more characters\)$')
         $script:MaxPreviewLength = 100000
+    }
+}
+
+Describe 'Preview text below an image' {
+    BeforeEach {
+        Reset-TestState
+        $State.PreviewTextShare = 0.3
+        # 225 px inside the padding, minus info line (20) and bar (5): 200 px for image and text
+        $script:Ui.Preview = [pscustomobject]@{ DisplayRectangle = [System.Drawing.Rectangle]::new(0, 0, 400, 225) }
+        $script:Ui.PreviewInfo = [pscustomobject]@{ Height = 20 }
+        $script:Ui.PreviewTextSplitter = [pscustomobject]@{ Height = 5 }
+        $script:Ui.PreviewText = [pscustomobject]@{ Dock = 'Bottom'; Height = 0 }
+    }
+
+    It 'gets its share of the space below the info line' {
+        Update-PreviewTextHeight
+        $Ui.PreviewText.Height | Should Be 60
+    }
+
+    It 'leaves the height of a text entry (filling the preview) alone' {
+        $Ui.PreviewText.Dock = 'Fill'
+        $Ui.PreviewText.Height = 77
+        Update-PreviewTextHeight
+        $Ui.PreviewText.Height | Should Be 77
+    }
+
+    It 'keeps the share set by dragging the bar when the whole preview is resized' {
+        $Ui.PreviewText.Height = 150   # dragged up
+        Save-PreviewTextShare
+        $State.PreviewTextShare | Should Be 0.75
+
+        $Ui.Preview.DisplayRectangle = [System.Drawing.Rectangle]::new(0, 0, 400, 425)
+        Update-PreviewTextHeight
+        $Ui.PreviewText.Height | Should Be 300
+    }
+
+    It 'keeps the share while the preview has no room' {
+        $Ui.Preview.DisplayRectangle = [System.Drawing.Rectangle]::new(0, 0, 400, 10)
+        $Ui.PreviewText.Height = 5
+        Save-PreviewTextShare
+        $State.PreviewTextShare | Should Be 0.3
+        Update-PreviewTextHeight
+        $Ui.PreviewText.Height | Should Be 0
+    }
+}
+
+Describe 'Initialize-ControlHandles' {
+    It 'creates the windows of hidden and nested controls without showing anything' {
+        $outer = [System.Windows.Forms.Panel]::new()
+        $inner = [System.Windows.Forms.Panel]::new()
+        $inner.Visible = $false
+        $label = [System.Windows.Forms.Label]::new()
+        $inner.Controls.Add($label)
+        $outer.Controls.Add($inner)
+        try {
+            Initialize-ControlHandles $outer
+            $inner.IsHandleCreated | Should Be $true
+            $label.IsHandleCreated | Should Be $true
+        }
+        finally {
+            $outer.Dispose()
+        }
     }
 }
 
