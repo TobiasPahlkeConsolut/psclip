@@ -27,7 +27,6 @@ function Read-ClipboardEntry {
     }
     # Text wins over an image: e.g. Excel offers copied cells as text and as a picture.
     if (-not $Data.GetDataPresent([DataFormats]::UnicodeText)) {
-        if ($MaxImages -eq 0) { return $null }
         return Read-ClipboardImage $Data
     }
 
@@ -205,23 +204,41 @@ function Set-ClipboardEntry {
 }
 
 function Limit-ClipboardHistory {
-    while ($State.History.Count -gt $MaxItems) {
-        $State.History.RemoveAt($State.History.Count - 1)
+    # Drops the oldest unpinned entries while all entries together - pinned ones included - need more
+    # memory than the limit. The newest entry always stays, even if pinned entries use up the limit.
+    $limit = $MemoryLimits[$State.MemoryLimit]
+    $total = (Get-HistorySize)
+    while ($total -gt $limit -and $State.History.Count -gt 1) {
+        $last = $State.History.Count - 1
+        $total -= $State.History[$last].Size
+        $State.History.RemoveAt($last)
     }
+}
 
-    # Images need much more memory than text: keep only the newest MaxImages of them.
-    $images = 0
-    $index = 0
-    while ($index -lt $State.History.Count) {
-        if ($State.History[$index].IsImage) {
-            $images++
-            if ($images -gt $MaxImages) {
-                $State.History.RemoveAt($index)
-                continue
-            }
-        }
-        $index++
-    }
+function Get-HistorySize {
+    # Approximate memory used by all entries, in bytes (see ClipEntry.Size)
+    [PsClip.ClipEntry]::TotalSize($State.Pinned) + [PsClip.ClipEntry]::TotalSize($State.History)
+}
+
+function Set-MemoryLimit {
+    # Tray menu "Memory limit": a lower limit drops the oldest entries right away.
+    param([string]$Limit)
+
+    $State.MemoryLimit = $Limit
+    Limit-ClipboardHistory
+    Update-TrayText
+    if ($Ui.Form.Visible) { Update-PopupList }
+    Write-Verbose "Memory limit $(Format-MemorySize $MemoryLimits[$Limit]); $($State.History.Count) entries in history."
+}
+
+function Format-MemorySize {
+    # 1048576 -> '1 MB', 1288490189 -> '1.2 GB'; at least '0.1 MB' for anything above zero
+    param([long]$Bytes)
+
+    $invariant = [Globalization.CultureInfo]::InvariantCulture   # the UI is English: 1.2, not 1,2
+    if ($Bytes -ge 1GB) { return [string]::Format($invariant, '{0:0.#} GB', $Bytes / 1GB) }
+    if ($Bytes -gt 0 -and $Bytes -lt 0.1MB) { $Bytes = 0.1MB }
+    [string]::Format($invariant, '{0:0.#} MB', $Bytes / 1MB)
 }
 
 function Clear-ClipboardHistory {

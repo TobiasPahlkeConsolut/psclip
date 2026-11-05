@@ -54,7 +54,8 @@ function Set-Theme {
     [PsClip.Native]::SetDarkControlTheme($Ui.PreviewText.Handle, $Dark)
 
     # Submenus are separate drop-downs and need their own renderer.
-    foreach ($menu in $Ui.TrayMenu, $Ui.SizeMenuItem.DropDown, $Ui.ListMenu, $Ui.PreviewMenu) {
+    $menus = $Ui.TrayMenu, $Ui.SizeMenuItem.DropDown, $Ui.MemoryMenuItem.DropDown, $Ui.ListMenu, $Ui.PreviewMenu
+    foreach ($menu in $menus) {
         $menu.Renderer = [PsClip.MenuRenderer]::new($colors.Back, $colors.Hover, $colors.Border, $colors.Text)
         $menu.BackColor = $colors.Back
         $menu.ForeColor = $colors.Text

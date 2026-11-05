@@ -17,16 +17,16 @@
         Shift+Enter           paste it as plain text
         F3                    show / hide the preview of the selected entry (full text or image)
         Ctrl+P                pin / unpin the entry; pinned entries stay on top and are never
-                              dropped by MaxItems or "Clear history"
+                              dropped by MaxMemory or "Clear history"
         Shift+Delete          remove the entry
         Esc                   close
 
     Right-click an entry for the same actions. In the preview, text can be selected and copied
     (also the text recognized in an image); drag the bar on its top edge to make it bigger, or
     the bar between an image and its text. Sizes and F3 are reset when the popup opens again.
-    Left-click the tray icon to open the history
-    in copy-only mode; right-click it for "Clear history", the settings (hotkey, dark mode,
-    window size) and "Exit". Settings changed there last until the script exits.
+    Left-click the tray icon to open the history in copy-only mode; right-click it for "Clear
+    history", the settings (hotkey, dark mode, window size, memory limit) and "Exit". Settings
+    changed there last until the script exits.
 
     Entries that the source application marks as private (password managers set the
     ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory formats) are
@@ -46,15 +46,14 @@
 
     The default, Ctrl+Oemtilde, is Ctrl+O-umlaut on a German keyboard and Ctrl+` on a US one.
 
-.PARAMETER MaxItems
-    Number of unpinned entries to keep; the oldest are dropped.
+.PARAMETER MaxMemory
+    Memory the history may use: 100MB (default), 500MB or 1GB - texts with their formatting,
+    images and the text recognized in them, pinned entries included. The oldest unpinned entries
+    are dropped to stay below it; pinned entries are never dropped. "Memory limit" in the tray
+    menu changes it.
 
 .PARAMETER MaxEntryLength
     Texts with more characters than this are not recorded (default 1,000,000).
-
-.PARAMETER MaxImages
-    Number of unpinned images to keep (default 20) - images need much more memory than text.
-    0 = do not record images.
 
 .PARAMETER Theme
     Dark (default), Light, or Auto to follow the Windows app theme (checked each time the popup
@@ -85,7 +84,7 @@
     Starts the manager without any console window.
 
 .EXAMPLE
-    .\ClipboardManager.ps1 -Hotkey 'Ctrl+Alt+V' -MaxItems 500 -Theme Light -Size L -Verbose
+    .\ClipboardManager.ps1 -Hotkey 'Ctrl+Alt+V' -MaxMemory 500MB -Theme Light -Size L -Verbose
 
     Runs in the current console and logs what happens (never the clipboard content itself).
 
@@ -104,14 +103,11 @@ using namespace System.Windows.Forms
 param(
     [string]$Hotkey = 'Ctrl+Oemtilde',
 
-    [ValidateRange(1, 100000)]
-    [int]$MaxItems = 200,
+    [ValidateSet('100MB', '500MB', '1GB')]
+    [string]$MaxMemory = '100MB',
 
     [ValidateRange(1, 100000000)]
     [int]$MaxEntryLength = 1000000,
-
-    [ValidateRange(0, 1000)]
-    [int]$MaxImages = 20,
 
     [ValidateSet('Dark', 'Light', 'Auto')]
     [string]$Theme = 'Dark',
@@ -192,12 +188,16 @@ $MaxPreviewLength = 100000   # characters shown in the preview
 $MaxImageBytes = 50MB            # PNG offered on the clipboard
 $MaxImagePixels = 100000000      # 100 megapixels
 
+# Memory the history may use (-MaxMemory, "Memory limit" in the tray menu)
+$MemoryLimits = [ordered]@{ '100MB' = 100MB; '500MB' = 500MB; '1GB' = 1GB }
+$MaxListItems = 1000   # entries shown in the list at most; the filter searches all of them
+
 # RegisterHotKey modifier flags
 $HotkeyModifiers = @{ Alt = 0x1; Ctrl = 0x2; Control = 0x2; Shift = 0x4; Win = 0x8; Windows = 0x8 }
 
 $EntryTextFlags = [TextFormatFlags]'VerticalCenter, EndEllipsis, SingleLine, NoPrefix'
 $PinTextFlags = [TextFormatFlags]'HorizontalCenter, VerticalCenter, SingleLine, NoPrefix'
-$LineBreakMark = " $([char]0x21B5) "   # shown instead of line breaks in the list
+$LineBreakMark = [PsClip.ClipEntry]::LineBreakMark   # shown instead of line breaks in the list
 
 #endregion
 
@@ -241,6 +241,8 @@ $State = @{
     Pinned               = [List[PsClip.ClipEntry]]::new()   # pinned entries, in pin order
     Filtered             = [List[PsClip.ClipEntry]]::new()   # entries currently shown in the popup
     FilteredPinnedCount  = 0
+    FoundCount           = 0                     # entries matching the filter (more than shown: MaxListItems)
+    MemoryLimit          = @($MemoryLimits.Keys) -eq $MaxMemory | Select-Object -First 1   # e.g. '100MB'
     OwnClipboardSequence = 0                     # sequence number of the clipboard change caused by pasting
     PasteTarget          = [IntPtr]::Zero        # window to paste into; zero = copy only
     HotkeySpec           = $hotkeySpec           # modifiers and key code, independent of the layout

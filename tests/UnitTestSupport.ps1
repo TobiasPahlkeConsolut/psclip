@@ -21,6 +21,8 @@ function Reset-TestState {
         Pinned               = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
         Filtered             = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
         FilteredPinnedCount  = 0
+        FoundCount           = 0
+        MemoryLimit          = '100MB'
         OwnClipboardSequence = 0
         PasteTarget         = [IntPtr]::Zero
         HotkeySpec          = [pscustomobject]@{ Modifiers = 6; VirtualKey = 0x56 }
@@ -44,10 +46,17 @@ function Reset-TestState {
         KeepAwakeTimer  = [pscustomobject]@{ Enabled = $false }
         ThumbnailHeight = 22
     }
-    $script:MaxItems = 200
-    $script:MaxImages = 20
+    $script:MemoryLimits = [ordered]@{ '100MB' = 100MB; '500MB' = 500MB; '1GB' = 1GB }
+    $script:MaxListItems = 1000
     $script:MaxEntryLength = 1000000
     $script:KeepAwakeSeconds = 30
+}
+
+function Set-TestMemoryLimit {
+    # A tiny memory limit in bytes: a text entry of n characters needs 100 + 2n bytes (ClipEntry.Size).
+    param([long]$Bytes)
+    $script:MemoryLimits = [ordered]@{ Test = $Bytes; Large = 1GB }
+    $State.MemoryLimit = 'Test'
 }
 
 function Add-Entries {

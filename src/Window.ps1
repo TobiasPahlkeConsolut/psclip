@@ -329,6 +329,18 @@ function New-TrayIcon {
         })
     }
     [void]$menu.Items.Add($Ui.SizeMenuItem)
+
+    $Ui.MemoryMenuItem = [ToolStripMenuItem]::new('Memory limit')
+    $Ui.MemoryMenuItem.ToolTipText = 'Memory the history may use; the oldest unpinned entries are dropped'
+    foreach ($limit in $MemoryLimits.Keys) {
+        $item = $Ui.MemoryMenuItem.DropDownItems.Add((Format-MemorySize $MemoryLimits[$limit]))
+        $item.Tag = $limit
+        $item.add_Click({
+            param($source, $e)
+            Set-MemoryLimit $source.Tag
+        })
+    }
+    [void]$menu.Items.Add($Ui.MemoryMenuItem)
     [void]$menu.Items.Add([ToolStripSeparator]::new())
 
     $Ui.KeepAwakeMenuItem = $menu.Items.Add('Keep awake')
@@ -357,6 +369,10 @@ function Update-TrayMenu {
     $Ui.DarkModeMenuItem.Checked = $State.IsDark
     foreach ($item in $Ui.SizeMenuItem.DropDownItems) {
         $item.Checked = $item.Tag -eq $State.PopupSize
+    }
+    $Ui.MemoryMenuItem.Text = "Memory limit ($(Format-MemorySize (Get-HistorySize)) used)"
+    foreach ($item in $Ui.MemoryMenuItem.DropDownItems) {
+        $item.Checked = $item.Tag -eq $State.MemoryLimit
     }
     $Ui.KeepAwakeMenuItem.Checked = $State.KeepAwake
 }

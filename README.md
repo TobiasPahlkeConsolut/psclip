@@ -11,12 +11,13 @@ The history lives in memory only and is gone when the script exits.
 
 ## Features
 
-- Records all text you copy, newest first (default: last 200 entries; copying an entry again moves it to the top)
+- Records all text you copy, newest first, up to a **memory limit** (100 MB, 500 MB or 1 GB, switchable in the tray
+  menu) - the oldest entries are dropped; copying an entry again moves it to the top
 - **Hotkey popup** (default `Ctrl+Ö` on a German keyboard) next to the mouse cursor: type to filter, `Enter` pastes
   into the window you were working in
 - **Keeps the formatting** (HTML and RTF, e.g. from Word, Outlook or a browser): `Enter` pastes with formatting,
   `Shift+Enter` as plain text
-- **Images** too, e.g. screenshots: shown with a thumbnail; the last 20 are kept
+- **Images** too, e.g. screenshots: shown with a thumbnail
 - **Search text in images**: the text in an image is recognized in the background (Windows' built-in OCR, offline),
   so typing a word from a screenshot finds it; typing `image` lists all images
 - **Preview** (`F3`) of the selected entry below the list: the full text or the image with its recognized text -
@@ -137,6 +138,8 @@ The **tray icon** (a small blue clipboard, possibly in the `^` overflow area of 
   - *Change hotkey* - press the new combination
   - *Dark mode* - on / off
   - *Window size* - Small, Medium, Large
+  - *Memory limit* - 100 MB, 500 MB, 1 GB; shows how much the history uses. A lower limit drops the oldest
+    entries right away
   - *Keep awake* - on / off (off by default)
   - *Exit*
 
@@ -159,9 +162,8 @@ windows). Windows then never sees the session as idle. While you are working, no
 | `-Hotkey`           | `Ctrl+Ö` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
 | `-Theme`            | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                    |
 | `-Size`             | `M`      | Popup size `S`, `M` or `L` - mostly the height (about 6, 10 or 17 entries visible) |
-| `-MaxItems`         | `200`    | Unpinned entries to keep                                                    |
+| `-MaxMemory`        | `100MB`  | Memory the history may use: `100MB`, `500MB` or `1GB` (pinned entries count, but are never dropped) |
 | `-MaxEntryLength`   | `1000000`| Texts with more characters are not recorded                                 |
-| `-MaxImages`        | `20`     | Unpinned images to keep (they need much more memory than text); `0` = none  |
 | `-Preview`          | off      | Open the popup with the preview (`F3`) shown                                |
 | `-KeepAwake`        | off      | Start with *Keep awake* switched on                                         |
 | `-KeepAwakeSeconds` | `30`     | Idle seconds before *Keep awake* presses F15                                |
@@ -202,6 +204,9 @@ processes, open the *Details* tab, right-click a column header, *Select columns*
   OCR language can be added in Windows' language settings (*Time & language > Language & region*) or by an
   administrator (`Add-WindowsCapability -Online -Name 'Language.OCR~~~de-DE~0.0.1.0'`). Without any OCR language,
   images are still recorded, just not searchable by their text.
+- **The memory limit** counts what the history stores: texts with their formatting, images (PNG-compressed, plus a
+  thumbnail) and the text recognized in them. psclip itself - PowerShell and .NET - needs about 100 MB on top. The
+  list shows the first 1,000 matching entries; type to find older ones (the filter searches all of them).
 - **In memory only** means psclip never writes the history anywhere. Windows itself may still move memory to the
   page file or into a crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is

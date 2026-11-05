@@ -186,6 +186,7 @@ function Hide-Popup {
     Clear-Preview
     $State.Filtered = [List[PsClip.ClipEntry]]::new()
     $State.FilteredPinnedCount = 0
+    $State.FoundCount = 0
 }
 
 function Switch-Popup {
@@ -202,24 +203,21 @@ function Update-PopupList {
     # SelectEntry if it is still shown, otherwise the row SelectIndex (clamped).
     param([int]$SelectIndex = 0, $SelectEntry = $null)
 
+    # Filtering and the list lines are done in C#: the history may hold many thousands of entries.
+    # Filling a list box takes long with that many, so it shows only the first MaxListItems.
     $terms = $Ui.Search.Text.Split([char[]]@(' ', "`t"), [StringSplitOptions]::RemoveEmptyEntries)
-    $found = [List[PsClip.ClipEntry]]::new()
-    foreach ($entry in $State.Pinned) {
-        if (Test-FilterMatch (Get-EntrySearchText $entry) $terms) { $found.Add($entry) }
-    }
+    $found = [PsClip.ClipEntry]::Filter($State.Pinned, $terms)
     $pinnedCount = $found.Count
-    foreach ($entry in $State.History) {
-        if (Test-FilterMatch (Get-EntrySearchText $entry) $terms) { $found.Add($entry) }
-    }
+    $found.AddRange([PsClip.ClipEntry]::Filter($State.History, $terms))
+    $State.FoundCount = $found.Count
+    if ($found.Count -gt $MaxListItems) { $found.RemoveRange($MaxListItems, $found.Count - $MaxListItems) }
     $State.Filtered = $found
-    $State.FilteredPinnedCount = $pinnedCount
+    $State.FilteredPinnedCount = [Math]::Min($pinnedCount, $found.Count)
 
     $list = $Ui.List
     $list.BeginUpdate()
     $list.Items.Clear()
-    foreach ($entry in $found) {
-        [void]$list.Items.Add((Get-EntryPreview $entry))
-    }
+    $list.Items.AddRange([PsClip.ClipEntry]::ListTexts($found))
     $list.EndUpdate()
     if ($found.Count -gt 0) {
         $entryIndex = if ($null -ne $SelectEntry) { Find-ClipboardEntry $found $SelectEntry } else { -1 }
@@ -240,8 +238,14 @@ function Update-StatusText {
     # too narrow for all of them.
     $action = if ($State.PasteTarget -ne [IntPtr]::Zero) { 'paste' } else { 'copy' }
     $total = $State.Pinned.Count + $State.History.Count
+    $count = if ($State.FoundCount -gt $State.Filtered.Count) {
+        "first $($State.Filtered.Count) of $($State.FoundCount)"   # type to narrow it down
+    }
+    else {
+        "$($State.Filtered.Count) of $total"
+    }
     $parts = [List[string]]::new()
-    foreach ($part in "$($State.Filtered.Count) of $total", "Enter $action", 'Shift+Enter plain',
+    foreach ($part in $count, "Enter $action", 'Shift+Enter plain',
         'F3 preview', 'Ctrl+P pin', 'Shift+Del remove') {
         $parts.Add($part)
     }
@@ -255,47 +259,6 @@ function Update-StatusText {
         $text = $parts -join $separator
     }
     $status.Text = $text
-}
-
-function Test-FilterMatch {
-    # True if the text contains every term (case-insensitive).
-    param([string]$Text, [string[]]$Terms)
-
-    foreach ($term in $Terms) {
-        if ($Text.IndexOf($term, [StringComparison]::OrdinalIgnoreCase) -lt 0) { return $false }
-    }
-    return $true
-}
-
-function Get-EntrySearchText {
-    # What the filter searches: the text, or for an image the word "image" and the text recognized in it.
-    param([PsClip.ClipEntry]$Entry)
-
-    if ($Entry.IsImage) { return "image $($Entry.OcrText)" }
-    $Entry.Text
-}
-
-function Get-EntryPreview {
-    # The line shown in the list; for images their size and the start of the recognized text.
-    param([PsClip.ClipEntry]$Entry)
-
-    if (-not $Entry.IsImage) { return Format-Preview $Entry.Text }
-    $label = "Image $($Entry.Width) $([char]0xD7) $($Entry.Height)"
-    if ($Entry.OcrText) { $label += "  $([char]0xB7)  " + (Format-Preview $Entry.OcrText) }
-    $label
-}
-
-function Format-Preview {
-    # One-line preview for the list; the full text is used when pasting. Looks only at the start
-    # of the text: entries can be megabytes long and this runs on every list refresh.
-    param([string]$Text)
-
-    $start = 0
-    while ($start -lt $Text.Length -and [char]::IsWhiteSpace($Text[$start])) { $start++ }
-    $preview = $Text.Substring($start, [Math]::Min(400, $Text.Length - $start)).TrimEnd()
-    if ($preview.Length -gt 300) { $preview = $preview.Substring(0, 300) }
-    $preview = $preview -replace '\r\n?|\n', $LineBreakMark
-    $preview -replace '[ \t]+', ' '
 }
 
 function Move-Selection {

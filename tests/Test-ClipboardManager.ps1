@@ -5,12 +5,13 @@
 .DESCRIPTION
     Starts the clipboard manager in a background process and drives it with window messages
     and real keystrokes: clipboard capture, de-duplication, private content, popup, filter,
-    pinning, pasting into another window, popup size, the tray menu (window size, hotkey
-    dialog, dark mode, keep awake) and graceful shutdown.
+    pinning, pasting into another window, preview, popup size, the tray menu (window size, memory
+    limit, hotkey dialog, dark mode, keep awake) and graceful shutdown.
 
     The test briefly opens windows and sends key presses - do not type, click or move the mouse
-    while it runs (about 45 seconds). Real keystrokes are only sent after checking that the expected window
-    is in the foreground. The clipboard (text, image, file list) is saved before and restored afterwards.
+    while it runs (about a minute). Real keystrokes are only sent after checking that the expected
+    window is in the foreground. The clipboard (text, image, file list) is saved before and
+    restored afterwards.
 
     It starts its own instance (-InstanceName PsClipboardManagerTest, its own hotkey) and only ever
     talks to and closes that process, so a psclip you are using keeps running. That psclip does
@@ -427,8 +428,19 @@ try {
     $switched = if ($Theme -eq 'Dark') { $darkToLight } else { $lightToDark }
     Add-Result 'Tray menu: dark mode switches the theme' $switched "brightness before $before, after $after"
 
+    # --- tray menu: Memory limit > 1 GB ---
+    $memoryChanged = $false
+    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 6 + $keyRight))) {   # 6x Down -> Memory limit
+        Wait-Milliseconds 300
+        Save-MenuImages "tray-menu-memory-$Theme"
+        if (Send-MenuKeys $keyUp, $keyEnter) {   # Up wraps around to the last item, 1 GB
+            $memoryChanged = Wait-Until { (Get-Content $log -Raw) -match 'Memory limit 1 GB;' }
+        }
+    }
+    Add-Result 'Tray menu: memory limit 1 GB' $memoryChanged
+
     # --- tray menu: Keep awake (presses F15 after $keepAwakeSeconds s without input) ---
-    $keepAwakeItem = @($keyDown) * 6 + $keyEnter   # 6x Down -> Keep awake
+    $keepAwakeItem = @($keyDown) * 7 + $keyEnter   # 7x Down -> Keep awake
     $idleOn = $idleOff = -1
     if ((Open-TrayMenu) -and (Send-MenuKeys $keepAwakeItem)) {
         $idleOn = Measure-MaxIdle 6000

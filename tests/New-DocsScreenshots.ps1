@@ -8,10 +8,14 @@
     it runs (about 15 seconds per theme). The clipboard is restored afterwards. A psclip you are
     using records the sample entries.
 
-    Writes popup-dark.png, popup-light.png and search-image-dark.png.
+    Writes popup-dark.png, popup-light.png, search-image-dark.png and tray-menu-dark.png.
 
 .PARAMETER OutputDirectory
     Where the screenshots go (default: the docs folder).
+
+.PARAMETER DefaultHotkey
+    Use psclip's default hotkey (Ctrl+Oemtilde), so that the tray menu shows it as in normal use.
+    Only possible while no other psclip is running (the hotkey would be taken).
 
 .EXAMPLE
     .\tests\New-DocsScreenshots.ps1
@@ -19,7 +23,9 @@
 
 [CmdletBinding()]
 param(
-    [string]$OutputDirectory   # default below: $PSScriptRoot is still empty in param() defaults (5.1)
+    [string]$OutputDirectory,   # default below: $PSScriptRoot is still empty in param() defaults (5.1)
+
+    [switch]$DefaultHotkey
 )
 
 Set-StrictMode -Version 2.0
@@ -29,7 +35,17 @@ if (-not $OutputDirectory) { $OutputDirectory = Join-Path $PSScriptRoot '..\docs
 . (Join-Path $PSScriptRoot 'TestSupport.ps1')
 
 $instanceName = 'PsClipboardManagerDocs'
-$currentHotkeyKeys = 0x11, 0x12, 0x10, 0x76   # Ctrl+Alt+Shift+F7
+if ($DefaultHotkey) {
+    $hotkeyText = 'Ctrl+Oemtilde'
+    $currentHotkeyKeys = 0x11, 0xC0                 # Ctrl, VK_OEM_3
+    $hotkeyFree = Test-HotkeyFree 0x2 0xC0
+}
+else {
+    $hotkeyText = 'Ctrl+Alt+Shift+F7'
+    $currentHotkeyKeys = 0x11, 0x12, 0x10, 0x76     # Ctrl, Alt, Shift, F7
+    $hotkeyFree = Test-HotkeyFree 0x7 0x76
+}
+if (-not $hotkeyFree) { throw "The hotkey $hotkeyText is used by another program (a running psclip?)." }
 $managerScript = (Resolve-Path (Join-Path $PSScriptRoot '..\ClipboardManager.ps1')).Path
 $OutputDirectory = (Resolve-Path $OutputDirectory).Path
 $log = Join-Path $env:TEMP 'psclip-docs-manager.log'
@@ -81,6 +97,18 @@ function Save-PopupImage {
     Save-WindowImage $popup $Name
 }
 
+function Save-TrayMenuImage {
+    # The tray menu's own window only (the largest visible one besides the popup) - never a screen
+    # area, which could show other windows.
+    param([string]$Name)
+
+    $menus = @([TestNative]::TopLevelWindowsOf($manager.Id) |
+        Where-Object { [TestNative]::IsWindowVisible($_) -and $_ -ne $popup } |
+        Sort-Object { $rect = [TestNative]::RectOf($_); $rect.Bottom - $rect.Top } -Descending)
+    if ($menus.Count -eq 0) { throw 'The tray menu is not open.' }
+    Save-WindowImage $menus[0] $Name
+}
+
 [void][TestNative]::SetProcessDPIAware()
 $savedClipboard = Save-Clipboard
 $target = [Form]::new()
@@ -94,7 +122,7 @@ try {
         Set-Clipboard -Value 'Best regards'
         $manager = Start-Process powershell.exe -NoNewWindow -PassThru -RedirectStandardOutput $log `
             -ArgumentList '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"", '-Theme', $theme,
-            '-InstanceName', $instanceName, '-Hotkey', 'Ctrl+Alt+Shift+F7', '-Verbose'
+            '-InstanceName', $instanceName, '-Hotkey', $hotkeyText, '-Verbose'
         try {
             if (-not (Wait-Until { (Test-Path $log) -and ((Get-Content $log -Raw) -cmatch 'Running \(PID') } 15000)) {
                 throw 'psclip did not start.'
@@ -135,6 +163,15 @@ try {
                 Wait-Milliseconds 300
             }
             Hide-TestPopup
+
+            if ($theme -eq 'Dark') {
+                # Tray menu, "Memory limit" highlighted (6x Down)
+                $menuOpen = (Open-TrayMenu) -and (Send-MenuKeys (@([byte]0x28) * 6))
+                if (-not $menuOpen) { throw 'The tray menu did not open.' }
+                Wait-Milliseconds 300
+                Save-TrayMenuImage 'tray-menu-dark.png'
+                [void](Send-MenuKeys 0x1B)   # Esc
+            }
         }
         finally {
             $window = Find-ManagerWindow $instanceName

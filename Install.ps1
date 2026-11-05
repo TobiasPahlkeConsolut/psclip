@@ -20,11 +20,8 @@
 .PARAMETER Hotkey
     Passed on to ClipboardManager.ps1, e.g. 'Ctrl+Alt+V'. Checked before anything is changed.
 
-.PARAMETER MaxItems
-    Passed on to ClipboardManager.ps1.
-
-.PARAMETER MaxImages
-    Passed on to ClipboardManager.ps1: images to keep (default 20, 0 = none).
+.PARAMETER MaxMemory
+    Passed on to ClipboardManager.ps1: memory the history may use, 100MB (default), 500MB or 1GB.
 
 .PARAMETER Theme
     Passed on to ClipboardManager.ps1: Dark (default), Light or Auto.
@@ -73,12 +70,8 @@ param(
     [string]$Hotkey,
 
     [Parameter(ParameterSetName = 'Install')]
-    [ValidateRange(1, 100000)]
-    [int]$MaxItems,
-
-    [Parameter(ParameterSetName = 'Install')]
-    [ValidateRange(0, 1000)]
-    [int]$MaxImages,
+    [ValidateSet('100MB', '500MB', '1GB')]
+    [string]$MaxMemory,
 
     [Parameter(ParameterSetName = 'Install')]
     [ValidateSet('Dark', 'Light', 'Auto')]
@@ -162,7 +155,7 @@ function Get-ShortcutArguments {
     param([System.Collections.IDictionary]$Settings)
 
     $arguments = @('--headless', $powershellExe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managerScript)
-    foreach ($name in 'Hotkey', 'MaxItems', 'MaxImages', 'Theme', 'Size', 'KeepAwakeSeconds') {
+    foreach ($name in 'Hotkey', 'MaxMemory', 'Theme', 'Size', 'KeepAwakeSeconds') {
         if ($Settings.ContainsKey($name)) { $arguments += "-$name", [string]$Settings[$name] }
     }
     foreach ($name in 'Preview', 'KeepAwake') {

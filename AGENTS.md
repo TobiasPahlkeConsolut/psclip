@@ -71,11 +71,17 @@ See [README.md](README.md) for features and usage.
   hotkey, theme, size, keep awake) and `$Ui` (controls, fonts, metrics, timer, `ClipHost`, `AppContext`).
   Functions read and mutate them directly; the unit tests replace them with stand-ins (`Reset-TestState`).
 - **Entries are `PsClip.ClipEntry` objects** (C#): `Text` plus optional `Html` / `Rtf`, or an image (`Png` bytes,
-  `Width`, `Height`, `Thumbnail`; `Text` is null - use `Get-EntryPreview` / `Get-EntrySearchText`). Lists hold the
+  `Width`, `Height`, `Thumbnail`; `Text` is null - use `ListText` / `SearchText`). Lists hold the
   objects; `Find-ClipboardEntry` compares content (`SameContent`: equal text, or equal image hash),
   `List.Remove`/`Contains` compare references. A re-copied entry replaces the old object (newer formatting wins);
-  pasting moves the same object to the top. `Limit-ClipboardHistory` caps all unpinned entries (`MaxItems`) and
-  unpinned images (`MaxImages`).
+  pasting moves the same object to the top.
+- **The history is limited by memory, not by count** (`-MaxMemory`, `$State.MemoryLimit`, tray menu):
+  `Limit-ClipboardHistory` drops the oldest unpinned entries while all entries (pinned included) need more than
+  the limit (`ClipEntry.Size`: UTF-16 text and formatting, PNG, thumbnail, recognized text); the newest entry always
+  stays. So the history can hold many thousands of entries: per-entry work of the list runs in C#
+  (`ClipEntry.Filter`, the cached `ListText`, `ListTexts`) - a PowerShell loop over all entries per keystroke takes
+  seconds. The list box shows at most `$MaxListItems` (filling it is slow too); the status line then says "first
+  1000 of 5000".
 - Images are read from the "PNG" format (with `ReadFormatBytes` - it is a custom format) or the standard bitmap,
   and only when the clipboard holds no text. A re-copied identical image keeps the existing entry (and its
   recognized text); only texts are replaced.
@@ -182,8 +188,9 @@ See [README.md](README.md) for features and usage.
    powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\Test-ClipboardManager.ps1 -Theme Light
    ```
    Exit code 0 = all steps passed. Look at the screenshots it writes to `%TEMP%\ClipboardManagerTests`.
-3. When the look of the popup changes, run `tests\New-DocsScreenshots.ps1` (same rules: ask first) and check the
-   new `docs\*.png` before committing them.
+3. When the look of the popup or the tray menu changes, run `tests\New-DocsScreenshots.ps1` (same rules: ask
+   first) and check the new `docs\*.png` before committing them. With `-DefaultHotkey` the tray menu shows the
+   default hotkey as users see it - only possible while the user's psclip is not running.
 
 ## Git
 

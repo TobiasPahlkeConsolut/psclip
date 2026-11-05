@@ -14,9 +14,9 @@ Describe 'Text in images (OCR)' {
     It 'makes images findable by their recognized text' {
         $entry = New-ImageEntry
         $entry.OcrText = "Invoice 4711`r`nTotal 99"
-        Test-FilterMatch (Get-EntrySearchText $entry) @('4711', 'total') | Should Be $true
+        $entry.Matches(@('4711', 'total')) | Should Be $true
         $expected = "Image 40 $([char]0xD7) 20  $([char]0xB7)  Invoice 4711$($LineBreakMark)Total 99"
-        Get-EntryPreview $entry | Should BeExactly $expected
+        $entry.ListText | Should BeExactly $expected
     }
 
     It 'keeps the entry and its recognized text when the same image is copied again' {

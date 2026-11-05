@@ -125,13 +125,6 @@ Describe 'Image entries' {
         $entry.Text | Should BeExactly 'cells'
     }
 
-    It 'are not recorded with MaxImages 0' {
-        $script:MaxImages = 0
-        $data = [System.Windows.Forms.DataObject]::new()
-        $data.SetImage((New-TestImage))
-        Read-ClipboardEntry $data | Should BeNullOrEmpty
-    }
-
     It 'move to the top when copied again instead of appearing twice' {
         Add-ClipboardEntry (New-ImageEntry 'Red')
         Add-Entries 'text'
@@ -139,15 +132,22 @@ Describe 'Image entries' {
         $State.History -join '|' | Should BeExactly 'Image 40 x 20|text'
     }
 
-    It 'are limited to the newest MaxImages, without touching texts' {
-        $script:MaxImages = 2
-        Add-ClipboardEntry (New-ImageEntry 'Red')
-        Add-Entries 'a'
-        Add-ClipboardEntry (New-ImageEntry 'Green')
-        Add-ClipboardEntry (New-ImageEntry 'Blue')
-        @($State.History | Where-Object { $_.IsImage }).Count | Should Be 2
+    It 'count their PNG and thumbnail toward the memory limit' {
+        $entry = New-ImageEntry -Width 400 -Height 100
+        $thumbnailBytes = 4 * $entry.Thumbnail.Width * $entry.Thumbnail.Height
+        $entry.Size | Should Be (100 + $entry.Png.Length + $thumbnailBytes)
+        $entry.OcrText = 'abc'
+        $entry.Size | Should Be (106 + $entry.Png.Length + $thumbnailBytes)
+    }
+
+    It 'are dropped like texts, oldest first' {
+        $image = New-ImageEntry 'Red'
+        Set-TestMemoryLimit ($image.Size + 2 * 102)   # the image and two one-character texts
+        Add-ClipboardEntry $image
+        Add-Entries 'a', 'b'
         $State.History.Count | Should Be 3
-        $State.History[-1].Text | Should BeExactly 'a'
+        Add-Entries 'c'
+        $State.History -join '|' | Should BeExactly 'c|b|a'
     }
 
     It 'go back on the clipboard as bitmap and PNG' {
@@ -159,9 +159,9 @@ Describe 'Image entries' {
 
     It 'show their size in the list and are found by the word image' {
         $entry = New-ImageEntry -Width 40 -Height 20
-        Get-EntryPreview $entry | Should BeExactly "Image 40 $([char]0xD7) 20"
-        Test-FilterMatch (Get-EntrySearchText $entry) @('IMAGE') | Should Be $true
-        Test-FilterMatch (Get-EntrySearchText $entry) @('text') | Should Be $false
+        $entry.ListText | Should BeExactly "Image 40 $([char]0xD7) 20"
+        $entry.Matches(@('IMAGE')) | Should Be $true
+        $entry.Matches(@('text')) | Should Be $false
     }
 }
 
@@ -245,10 +245,34 @@ Describe 'Clipboard history' {
         $State.History.Count | Should Be 2
     }
 
-    It 'drops the oldest entries beyond MaxItems' {
-        $script:MaxItems = 3
+    It 'drops the oldest entries above the memory limit' {
+        Set-TestMemoryLimit (3 * 104)   # three entries of two characters
         Add-Entries 'e1', 'e2', 'e3', 'e4', 'e5'
         $State.History -join '|' | Should BeExactly 'e5|e4|e3'
+    }
+
+    It 'counts texts with their formatting toward the memory limit (UTF-16: 2 bytes per character)' {
+        (New-FormattedEntry 'abc' -Rtf 'rtf' -Html 'h').Size | Should Be (100 + 2 * 7)
+    }
+
+    It 'keeps the newest entry even when pinned entries use up the memory limit' {
+        Set-TestMemoryLimit 150
+        Add-Entries 'pinned'
+        Switch-ClipboardPin (Get-Entry 'pinned')
+        Add-Entries 'a'
+        $State.History -join '|' | Should BeExactly 'a'
+        Add-Entries 'b'
+        $State.History -join '|' | Should BeExactly 'b'
+    }
+
+    It 'drops entries right away when the memory limit is lowered' {
+        Set-TestMemoryLimit 1000
+        Add-Entries 'a', 'b', 'c'
+        $script:MemoryLimits['Small'] = 2 * 102
+        Set-MemoryLimit 'Small'
+        $State.MemoryLimit | Should BeExactly 'Small'
+        $State.History -join '|' | Should BeExactly 'c|b'
+        $Ui.Tray.Text | Should Match ': 2 entries \('
     }
 
     It 'replaces a re-copied entry, so that the newer formatting wins' {
@@ -302,8 +326,8 @@ Describe 'Clipboard history' {
         $State.Pinned -join '|' | Should BeExactly 'a'
     }
 
-    It 'never drops pinned entries because of MaxItems' {
-        $script:MaxItems = 2
+    It 'never drops pinned entries because of the memory limit, but counts them' {
+        Set-TestMemoryLimit (112 + 2 * 102)   # 'pinned' and two one-character texts
         Add-Entries 'pinned'
         Switch-ClipboardPin (Get-Entry 'pinned')
         Add-Entries 'x', 'y', 'z'
@@ -326,5 +350,19 @@ Describe 'Clipboard history' {
         $State.History.Count | Should Be 0
         $State.Pinned -join '|' | Should BeExactly 'a'
         $Ui.Tray.Text | Should Match ': 1 entry \('
+    }
+}
+
+Describe 'Format-MemorySize' {
+    It 'shows megabytes below 1 GB and gigabytes above, with a point as decimal separator' {
+        Format-MemorySize 100MB | Should BeExactly '100 MB'
+        Format-MemorySize 1.5MB | Should BeExactly '1.5 MB'
+        Format-MemorySize 1GB | Should BeExactly '1 GB'
+        Format-MemorySize 1288490189 | Should BeExactly '1.2 GB'
+    }
+
+    It 'shows a small history as 0.1 MB, not as nothing' {
+        Format-MemorySize 0 | Should BeExactly '0 MB'
+        Format-MemorySize 500 | Should BeExactly '0.1 MB'
     }
 }

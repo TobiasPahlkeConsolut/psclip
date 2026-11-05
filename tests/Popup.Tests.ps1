@@ -64,6 +64,25 @@ Describe 'Update-PopupList' {
         Update-PopupList
         $Ui.Status.Text | Should Match 'Enter paste'
     }
+
+    It 'shows only the first MaxListItems entries, but finds all of them' {
+        $script:MaxListItems = 2
+        Update-PopupList
+        $State.Filtered -join '|' | Should BeExactly 'one|three'
+        $Ui.List.Items.Count | Should Be 2
+        $State.FoundCount | Should Be 3
+        $Ui.Status.Text | Should Match '^first 2 of 3'
+
+        $Ui.Search.Text = 'two'   # older entries are still found by the filter
+        Update-PopupList
+        $State.Filtered -join '|' | Should BeExactly 'two'
+        $Ui.Status.Text | Should Match '^1 of 3'
+    }
+
+    It 'shows the list lines of the entries' {
+        Update-PopupList
+        @($Ui.List.Items) -join '|' | Should BeExactly 'one|three|two'
+    }
 }
 
 Describe 'Hide-Popup' {
@@ -245,31 +264,44 @@ Describe 'Invoke-PopupKey' {
     }
 }
 
-Describe 'Test-FilterMatch' {
+Describe 'Filter (ClipEntry.Matches)' {
     It 'matches when every term occurs, in any order and case' {
-        Test-FilterMatch 'Hello World' @('world', 'HEL') | Should Be $true
+        ([PsClip.ClipEntry]::new('Hello World')).Matches(@('world', 'HEL')) | Should Be $true
     }
 
     It 'does not match when one term is missing' {
-        Test-FilterMatch 'Hello World' @('hello', 'moon') | Should Be $false
+        ([PsClip.ClipEntry]::new('Hello World')).Matches(@('hello', 'moon')) | Should Be $false
     }
 
     It 'matches everything without terms' {
-        Test-FilterMatch 'anything' @() | Should Be $true
+        ([PsClip.ClipEntry]::new('anything')).Matches([string[]]@()) | Should Be $true
+    }
+
+    It 'keeps the order of the entries' {
+        $entries = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
+        foreach ($text in 'b1', 'a', 'b2') { $entries.Add([PsClip.ClipEntry]::new($text)) }
+        [PsClip.ClipEntry]::Filter($entries, @('b')) -join '|' | Should BeExactly 'b1|b2'
     }
 }
 
-Describe 'Format-Preview' {
+Describe 'List line (ClipEntry.ListText)' {
     It 'shows line breaks as a mark and collapses spaces and tabs' {
         $expected = 'first' + $LineBreakMark + 'second' + $LineBreakMark + 'third end'
-        Format-Preview "  first`r`nsecond`n`tthird   end  " | Should BeExactly $expected
+        ([PsClip.ClipEntry]::new("  first`r`nsecond`n`tthird   end  ")).ListText | Should BeExactly $expected
     }
 
     It 'cuts long text to 300 characters' {
-        (Format-Preview ('x' * 1000)).Length | Should Be 300
+        ([PsClip.ClipEntry]::new('x' * 1000)).ListText.Length | Should Be 300
     }
 
     It 'skips long leading whitespace' {
-        Format-Preview ((' ' * 1000) + 'text') | Should BeExactly 'text'
+        ([PsClip.ClipEntry]::new((' ' * 1000) + 'text')).ListText | Should BeExactly 'text'
+    }
+
+    It 'is renewed when the text in an image has been recognized' {
+        $entry = New-ImageEntry -Width 40 -Height 20
+        $entry.ListText | Should BeExactly "Image 40 $([char]0xD7) 20"
+        $entry.OcrText = 'found'
+        $entry.ListText | Should Match 'found$'
     }
 }
