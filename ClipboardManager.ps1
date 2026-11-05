@@ -105,6 +105,8 @@
     Runs in the current console and logs what happens (never the clipboard content itself).
 
 .NOTES
+    psclip 1.0.0 - https://github.com/TobiasPahlkeConsolut/psclip
+
     Stop it via the tray menu (Exit). Other programs can stop it gracefully by posting WM_CLOSE
     to its hidden window titled 'PsClipboardManager' (the InstanceName).
 #>
@@ -176,6 +178,9 @@ if (-not ('PsClip.Native' -as [type])) {
 #endregion
 
 #region Settings
+
+# Also in .NOTES above and CHANGELOG.md (tests\Release.Tests.ps1 checks that they match)
+$PsClipVersion = '1.0.0'
 
 $Palettes = @{
     Dark  = @{
@@ -255,6 +260,7 @@ $LineBreakMark = [PsClip.ClipEntry]::LineBreakMark   # shown instead of line bre
 # Dot-sourced (". .\ClipboardManager.ps1", used by the unit tests): only load the functions.
 if ($MyInvocation.InvocationName -eq '.') { return }
 
+Write-Verbose "psclip $PsClipVersion"
 $hotkeySpec = ConvertFrom-HotkeyText $Hotkey   # fails early on an invalid hotkey
 if ($PSBoundParameters.ContainsKey('MaxItems') -or $PSBoundParameters.ContainsKey('MaxImages')) {
     Write-Verbose '-MaxItems and -MaxImages are ignored: the history is limited by -MaxMemory now.'

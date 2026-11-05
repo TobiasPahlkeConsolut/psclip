@@ -7,7 +7,8 @@
 #>
 
 $repository = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$sourceFiles = @(Get-ChildItem -LiteralPath $repository, (Join-Path $repository 'src'), $PSScriptRoot -File |
+$folders = $repository, (Join-Path $repository 'src'), (Join-Path $repository 'tools'), $PSScriptRoot
+$sourceFiles = @(Get-ChildItem -LiteralPath $folders -File |
     Where-Object { $_.Extension -in '.ps1', '.cs' })
 
 function Get-Violations {

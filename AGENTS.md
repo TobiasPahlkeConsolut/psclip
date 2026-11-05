@@ -28,6 +28,9 @@ See [README.md](README.md) for features and usage.
 | `tests/New-DocsScreenshots.ps1`   | Takes the README screenshots (`docs/*.png`) with sample content      |
 | `tests/TestSupport.ps1`           | Window helpers shared by the two scripts above                       |
 | `docs/`                           | Screenshots for the README                                           |
+| `CHANGELOG.md`                    | Changes per version - also the GitHub release notes                  |
+| `tools/New-ReleaseZip.ps1`        | Builds `dist/psclip-<version>.zip` (only the files users need)       |
+| `tests/Release.Tests.ps1`         | Version consistency and the content of the release ZIP               |
 | `LICENSE`                         | MIT License                                                          |
 
 ## Hard constraints
@@ -232,6 +235,19 @@ See [README.md](README.md) for features and usage.
 3. When the look of the popup or the tray menu changes, run `tests\New-DocsScreenshots.ps1` (same rules: ask
    first) and check the new `docs\*.png` before committing them. With `-DefaultHotkey` the tray menu shows the
    default hotkey as users see it - only possible while the user's psclip is not running.
+
+## Releases
+
+Version numbers are `major.minor.patch`. For a release:
+
+1. Set the version in `ClipboardManager.ps1` (`$PsClipVersion` and the first line of `.NOTES`) and add a section
+   `## <version> - <date>` at the top of `CHANGELOG.md` - `tests/Release.Tests.ps1` checks that all three match.
+2. Unit tests, end-to-end test in both themes (ask the owner first, see above), screenshots if the look changed.
+3. `.\tools\New-ReleaseZip.ps1` -> `dist\psclip-<version>.zip` (one `psclip` folder: app, installer, `src`, `docs`,
+   README, CHANGELOG, LICENSE; extracting it over an older one updates psclip and keeps `pinned.dat`).
+4. Commit, then an annotated tag `v<version>`, and push both (`git push origin main v<version>`).
+5. The owner creates the GitHub release from the tag (no `gh` here): title `psclip <version>`, the CHANGELOG section
+   as text, the ZIP attached.
 
 ## Git
 

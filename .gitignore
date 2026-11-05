@@ -2,3 +2,6 @@
 # writing and files set aside as unreadable) - personal data, even though encrypted: never commit them.
 /pinned*.dat
 /pinned*.dat.*
+
+# Release ZIPs built by tools\New-ReleaseZip.ps1 - attached to the GitHub release, not committed
+/dist/

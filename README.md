@@ -41,13 +41,27 @@ The history lives in memory only and is gone when the script exits; only pinned 
 
 ## Install
 
-In a PowerShell window:
+**Download:** get `psclip-<version>.zip` from the [latest release](https://github.com/TobiasPahlkeConsolut/psclip/releases/latest),
+then in a PowerShell window in your Downloads folder:
+
+```powershell
+Unblock-File .\psclip-1.0.0.zip          # Windows marks downloads; unblocked, PowerShell runs the scripts
+Expand-Archive .\psclip-1.0.0.zip -DestinationPath $HOME\Documents   # creates Documents\psclip
+cd $HOME\Documents\psclip
+.\Install.ps1 -Autostart
+```
+
+**Or with git:**
 
 ```powershell
 git clone https://github.com/TobiasPahlkeConsolut/psclip.git
 cd psclip
 .\Install.ps1 -Autostart
 ```
+
+**Updating:** extract the new ZIP over the old `psclip` folder (or `git pull`) - your saved pinned entries
+(`pinned.dat`) stay - and run `Install.ps1` again with your settings; it restarts psclip. What changed is in
+[CHANGELOG.md](CHANGELOG.md).
 
 What `Install.ps1` does - and doesn't:
 
@@ -75,8 +89,8 @@ Running `Install.ps1` again replaces the shortcuts, so this is also how you chan
 With the common setting `RemoteSigned` (check with `Get-ExecutionPolicy -List`) the commands above work as they
 are. Only if Windows refuses to run the scripts:
 
-- **Downloaded as ZIP** instead of cloned: Windows marks the files as coming from the internet. Unblock them once:
-  `Get-ChildItem -Recurse -Filter *.ps1 | Unblock-File`
+- **ZIP extracted without unblocking it first**: Windows marks the files as coming from the internet. Unblock them
+  once in the psclip folder: `Get-ChildItem -Recurse -Filter *.ps1 | Unblock-File`
 - **Stricter policy** (`Restricted`, `AllSigned`): bypass it for this one call - it does not change your settings:
   `powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart`
 
@@ -223,13 +237,6 @@ Code uses `Ctrl+Ö` to toggle its terminal; the global hotkey takes precedence, 
 
 This stops a running instance and removes both shortcuts. Then delete the folder (with *Keep pinned entries* it also
 holds your saved pinned entries, `pinned.dat`).
-
-## In Task Manager
-
-psclip is a plain `powershell.exe` process: it is listed as **Windows PowerShell** under *Background processes*
-(started via the shortcut, below a *Console Window Host* / `conhost.exe`). To tell it apart from other PowerShell
-processes, open the *Details* tab, right-click a column header, *Select columns* and enable *Command line* - it shows
-`...ClipboardManager.ps1`.
 
 ## Limitations
 
