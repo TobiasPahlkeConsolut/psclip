@@ -21,6 +21,8 @@
     .\tests\New-DocsScreenshots.ps1
 #>
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '',
+    Justification = 'Used by the functions of the dot-sourced TestSupport.ps1')]
 [CmdletBinding()]
 param(
     [string]$OutputDirectory,   # default below: $PSScriptRoot is still empty in param() defaults (5.1)

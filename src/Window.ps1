@@ -7,6 +7,10 @@ using namespace System.Windows.Forms
 
 
 function Initialize-Ui {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '',
+        Justification = 'SetCompatibleTextRenderingDefault fails harmlessly after the first window')]
+    param()
+
     [void][PsClip.Native]::SetProcessDPIAware()
     [Application]::EnableVisualStyles()
     try {

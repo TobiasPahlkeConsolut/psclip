@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.1 - 2026-11-05
 
 - README: install to `%LOCALAPPDATA%\tools\psclip` instead of Documents, which OneDrive often syncs
+- The code is checked with Microsoft's PSScriptAnalyzer (`tools\Invoke-Lint.ps1`) - no change in behavior
+- Releases are now built and published automatically (GitHub Actions)
 
 ## 1.0.0 - 2026-11-05
 

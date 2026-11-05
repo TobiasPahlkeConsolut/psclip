@@ -30,6 +30,8 @@ function ConvertFrom-HotkeyText {
 
 function ConvertTo-Key {
     # 'V', 'F12', 'Oemtilde', '1' or the character printed on a key (e.g. an umlaut) -> [Keys]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '',
+        Justification = 'A name that is not a [Keys] name is tried as a character next')]
     param([string]$Name)
 
     $keyName = if ($Name -match '^\d$') { "D$Name" } else { $Name }   # '1' -> Keys.D1

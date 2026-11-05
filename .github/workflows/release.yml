@@ -1,0 +1,35 @@
+# Publishes a GitHub release when a version tag (v1.2.3) is pushed: builds the ZIP with tools\New-ReleaseZip.ps1
+# and takes the text from the version's section in CHANGELOG.md. Fails if the tag does not match $PsClipVersion in
+# ClipboardManager.ps1. Free on public repositories (standard GitHub-hosted runner).
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # create the release and attach the ZIP
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@v5
+
+      - name: Build the ZIP and the release text
+        shell: powershell   # Windows PowerShell 5.1, like psclip itself
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          .\tools\New-ReleaseZip.ps1 -OutputDirectory dist -NotesFile dist\release-notes.md -ExpectedVersion $version
+
+      - name: Publish the release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          gh release create $env:GITHUB_REF_NAME "dist\psclip-$version.zip" --verify-tag `
+            --title "psclip $version" --notes-file dist\release-notes.md
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

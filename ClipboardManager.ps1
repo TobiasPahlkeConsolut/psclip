@@ -105,7 +105,7 @@
     Runs in the current console and logs what happens (never the clipboard content itself).
 
 .NOTES
-    psclip 1.0.0 - https://github.com/TobiasPahlkeConsolut/psclip
+    psclip 1.0.1 - https://github.com/TobiasPahlkeConsolut/psclip
 
     Stop it via the tray menu (Exit). Other programs can stop it gracefully by posting WM_CLOSE
     to its hidden window titled 'PsClipboardManager' (the InstanceName).
@@ -117,6 +117,8 @@ using namespace System.Collections.Generic
 using namespace System.Drawing
 using namespace System.Windows.Forms
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '',
+    Justification = 'The settings are used by the dot-sourced part files, which are analyzed one by one')]
 [CmdletBinding()]
 param(
     [string]$Hotkey = 'Ctrl+Oemtilde',
@@ -180,7 +182,7 @@ if (-not ('PsClip.Native' -as [type])) {
 #region Settings
 
 # Also in .NOTES above and CHANGELOG.md (tests\Release.Tests.ps1 checks that they match)
-$PsClipVersion = '1.0.0'
+$PsClipVersion = '1.0.1'
 
 $Palettes = @{
     Dark  = @{

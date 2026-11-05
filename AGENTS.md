@@ -29,7 +29,10 @@ See [README.md](README.md) for features and usage.
 | `tests/TestSupport.ps1`           | Window helpers shared by the two scripts above                       |
 | `docs/`                           | Screenshots for the README                                           |
 | `CHANGELOG.md`                    | Changes per version - also the GitHub release notes                  |
-| `tools/New-ReleaseZip.ps1`        | Builds `dist/psclip-<version>.zip` (only the files users need)       |
+| `tools/New-ReleaseZip.ps1`        | Builds `dist/psclip-<version>.zip` (only the files users need) and the release text |
+| `tools/Invoke-Lint.ps1`           | Code check with PSScriptAnalyzer (see Style)                         |
+| `PSScriptAnalyzerSettings.psd1`   | The PSScriptAnalyzer rules that do not fit psclip, with the reasons  |
+| `.github/workflows/release.yml`   | Publishes the GitHub release when a `v<version>` tag is pushed       |
 | `tests/Release.Tests.ps1`         | Version consistency and the content of the release ZIP               |
 | `LICENSE`                         | MIT License                                                          |
 
@@ -212,7 +215,13 @@ See [README.md](README.md) for features and usage.
 - Approved verbs for function names (`Get-Verb`), one statement per line, comments explain *why*.
 - Keep `Set-StrictMode -Version 2.0` and `$ErrorActionPreference = 'Stop'` passing.
 - `tests/Style.Tests.ps1` checks the mechanical rules (ASCII, tabs, whitespace, line length, `else` placement,
-  parse errors) - there is no formatter or PSScriptAnalyzer (not installed, and nothing gets installed).
+  parse errors). There is no formatter.
+- `tools/Invoke-Lint.ps1` runs Microsoft's PSScriptAnalyzer with `PSScriptAnalyzerSettings.psd1`: an installed module
+  or the copy that comes with VS Code's PowerShell extension, loaded only if validly signed by Microsoft - nothing gets
+  installed. Keep it at 0 findings. Rules that do not fit are excluded in the settings file (with the reason);
+  single intended findings get a `[Diagnostics.CodeAnalysis.SuppressMessageAttribute(...)]` with a `Justification`
+  on the function's or script's `param()` block. PSScriptAnalyzer checks file by file, so variables used only by
+  dot-sourced files look unused - suppress that per file, not by excluding the rule.
 
 ## Verifying changes
 
@@ -253,9 +262,13 @@ Version numbers are `major.minor.patch`. For a release:
 2. Unit tests, end-to-end test in both themes (ask the owner first, see above), screenshots if the look changed.
 3. `.\tools\New-ReleaseZip.ps1` -> `dist\psclip-<version>.zip` (one `psclip` folder: app, installer, `src`, `docs`,
    README, CHANGELOG, LICENSE; extracting it over an older one updates psclip and keeps `pinned.dat`).
-4. Commit, then an annotated tag `v<version>`, and push both (`git push origin main v<version>`).
-5. The owner creates the GitHub release from the tag (no `gh` here): title `psclip <version>`, the CHANGELOG section
-   as text, the ZIP attached.
+4. `.\tools\Invoke-Lint.ps1` (0 findings), then commit and push `main`.
+5. An annotated tag `v<version>` on that commit, pushed (`git push origin v<version>`): the workflow
+   `.github/workflows/release.yml` builds the ZIP on GitHub's Windows runner and publishes the release - title
+   `psclip <version>`, the CHANGELOG section as text (`Get-ReleaseNotes`), the ZIP attached. It fails if the tag does
+   not match `$PsClipVersion`. Check the run and the release afterwards (public API, no login needed:
+   `https://api.github.com/repos/TobiasPahlkeConsolut/psclip/releases/latest`). Never move a pushed tag of a
+   published release - make a new version instead.
 
 ## Git
 

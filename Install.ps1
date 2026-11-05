@@ -278,8 +278,10 @@ function Get-UnloadedPinnedWarning {
 }
 
 function Confirm-Restart {
-    param([string]$Question)
+    # $true to restart a running psclip: -Force, or the user's answer.
+    param([string]$Question, [switch]$Force)
 
+    if ($Force) { return $true }
     try {
         return $PSCmdlet.ShouldContinue($Question, 'Restart psclip')
     }
@@ -347,7 +349,7 @@ $runningId = Get-ManagerProcessId
 if ($runningId -ne 0) {
     $question = 'psclip is running. Restart it now so that the new settings apply? Its history will be ' +
         "lost - and its pinned entries too, unless 'Keep pinned entries' is on in its tray menu."
-    if (-not ($Force -or (Confirm-Restart $question))) {
+    if (-not (Confirm-Restart -Question $question -Force:$Force)) {
         Write-Host 'psclip keeps running with its current settings; the new ones apply the next time it starts.'
         return
     }

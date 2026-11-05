@@ -7,6 +7,10 @@
     built in memory with [DataObject].
 #>
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseDeclaredVarsMoreThanAssignments', '',
+    Justification = 'Used by the test files that dot-source this one')]
+param()
+
 # Load the functions without starting the app (see the guard at the start of "#region Main").
 . (Join-Path $PSScriptRoot '..\ClipboardManager.ps1')
 
@@ -138,7 +142,7 @@ function New-TestImage {
 
 function New-ImageEntry {
     param([string]$Color = 'SteelBlue', [int]$Width = 40, [int]$Height = 20)
-    [PsClip.ClipEntry]::FromImage((New-TestImage $Width $Height $Color), 22)
+    [PsClip.ClipEntry]::FromImage((New-TestImage -Width $Width -Height $Height -Color $Color), 22)
 }
 
 function New-KeyEvent {

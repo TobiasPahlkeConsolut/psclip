@@ -45,7 +45,7 @@ The history lives in memory only and is gone when the script exits; only pinned 
 then in a PowerShell window in your Downloads folder:
 
 ```powershell
-Expand-Archive .\psclip-1.0.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
+Expand-Archive .\psclip-1.0.1.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
 cd $env:LOCALAPPDATA\tools\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
@@ -286,11 +286,15 @@ dialogs are Windows Forms. Everything else is PowerShell.
 
 ## Development
 
-See [AGENTS.md](AGENTS.md) for the conventions and pitfalls of this code base. There are two kinds of tests:
+See [AGENTS.md](AGENTS.md) for the conventions and pitfalls of this code base. There are two kinds of tests, plus a
+code check:
 
 ```powershell
 # Unit tests: a few seconds, invisible (Pester 3.4, which ships with Windows)
 .\tests\Invoke-UnitTests.ps1
+
+# Code check with Microsoft's PSScriptAnalyzer - the copy in VS Code's PowerShell extension, nothing is installed
+.\tools\Invoke-Lint.ps1
 
 # End-to-end test: starts its own psclip and drives it on the real desktop - it opens windows and sends keystrokes
 # for about 45 seconds, so don't type, click or move the mouse meanwhile

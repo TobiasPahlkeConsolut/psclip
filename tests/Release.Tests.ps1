@@ -24,6 +24,28 @@ Describe 'Version' {
         $newest = @($changelog | Where-Object { $_ -like '## *' -and $_ -ne '## Unreleased' })[0]
         $newest | Should Match "^## $([regex]::Escape($version)) - \d{4}-\d{2}-\d{2}$"
     }
+
+    It "is the one in the README's install example" {
+        $readme = [IO.File]::ReadAllText((Join-Path $repository 'README.md'))
+        $named = @([regex]::Matches($readme, 'psclip-(\d+\.\d+\.\d+)\.zip') | ForEach-Object { $_.Groups[1].Value })
+        $named.Count | Should BeGreaterThan 0
+        @($named | Where-Object { $_ -ne $version }) -join ', ' | Should BeExactly ''
+    }
+}
+
+Describe 'Get-ReleaseNotes' {
+    It "is the version's CHANGELOG.md section without its heading, plus where to start" {
+        $notes = Get-ReleaseNotes -Root $repository -Version '1.0.0'
+        $notes | Should Match '^The first release\.'
+        $notes | Should Not Match '## '
+        $notes | Should Match '\*\*Install:\*\* download `psclip-1\.0\.0\.zip` below'
+    }
+
+    It 'stops at the next section and refuses a version without one' {
+        $current = Get-ReleaseNotes -Root $repository -Version (Get-PsClipVersion $repository)
+        $current | Should Not Match 'The first release'
+        { Get-ReleaseNotes -Root $repository -Version '0.0.1' } | Should Throw 'no section'
+    }
 }
 
 Describe 'New-ReleaseZip' {
