@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.1.1 - 2026-11-06
 
+- A copy is no longer lost now and then when another program - Teams or a remote desktop client, also in the
+  background - reads the clipboard at the same moment: psclip reads it again a few times
 - Shorter README; the details are in `docs/`: install, usage, options, limitations, development
 - Saving the pinned entries no longer fails now and then ("Could not save the pinned entries") when a virus scanner
   or backup program holds the file for a moment: psclip tries again briefly

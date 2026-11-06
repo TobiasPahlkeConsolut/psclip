@@ -86,6 +86,7 @@ function Reset-TestState {
         FoundCount           = 0
         MemoryLimit          = '100MB'
         OwnClipboardSequence = 0
+        ClipboardRetry       = @{ Sequence = 0; Count = 0 }
         PasteTarget         = [IntPtr]::Zero
         HotkeySpec          = [pscustomobject]@{ Modifiers = 6; VirtualKey = 0x56 }
         HotkeyText          = 'Ctrl+Shift+V'

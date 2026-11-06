@@ -108,7 +108,7 @@
     Runs in the current console and logs what happens (never the clipboard content itself).
 
 .NOTES
-    psclip 1.1.0 - https://github.com/TobiasPahlkeConsolut/psclip
+    psclip 1.1.1 - https://github.com/TobiasPahlkeConsolut/psclip
 
     Stop it via the tray menu (Exit). Other programs can stop it gracefully by posting WM_CLOSE
     to its hidden window titled 'PsClipboardManager' (the InstanceName).
@@ -185,7 +185,7 @@ if (-not ('PsClip.Native' -as [type])) {
 #region Settings
 
 # Also in .NOTES above and CHANGELOG.md (tests\Release.Tests.ps1 checks that they match)
-$PsClipVersion = '1.1.0'
+$PsClipVersion = '1.1.1'
 
 $Palettes = @{
     Dark  = @{
@@ -239,6 +239,7 @@ $MaxImagePixels = 100000000      # 100 megapixels
 # (set, then flush), and other programs (Teams, remote desktop clients) read it at once: reading right away can
 # find the clipboard busy and miss the formatting. The popup reads a pending change when it opens.
 $ClipboardReadDelay = 100
+$ClipboardReadRetries = 3   # reads again after that delay while another program holds the clipboard
 
 # Memory the history may use (-MaxMemory, "Memory limit" in the tray menu)
 $MemoryLimits = [ordered]@{ '100MB' = 100MB; '500MB' = 500MB; '1GB' = 1GB }
@@ -300,6 +301,7 @@ $State = @{
     FoundCount           = 0                     # entries matching the filter (more than shown: MaxListItems)
     MemoryLimit          = @($MemoryLimits.Keys) -eq $MaxMemory | Select-Object -First 1   # e.g. '100MB'
     OwnClipboardSequence = 0                     # sequence number of the clipboard change caused by pasting
+    ClipboardRetry       = @{ Sequence = 0; Count = 0 }   # reads again of a change the clipboard was busy for
     PasteTarget          = [IntPtr]::Zero        # window to paste into; zero = copy only
     HotkeySpec           = $hotkeySpec           # modifiers and key code, independent of the layout
     HotkeyText           = Format-HotkeySpec $hotkeySpec   # as shown to the user

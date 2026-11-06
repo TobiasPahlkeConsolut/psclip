@@ -125,7 +125,11 @@ features, quick install, key table, links.
   timer that further notifications do not restart, so constant changes cannot postpone it); `Show-Popup` reads a
   pending change first, so a copy just before the hotkey is listed. Reading at once collided with other readers
   (Teams, the Horizon client, a second psclip) and read one copy twice (set, then flush) - a second read that missed
-  the formatting replaced the formatted entry with plain text.
+  the formatting replaced the formatted entry with plain text. Such programs read every change, also in the
+  background, and hold the clipboard open meanwhile: a read then fails, or silently finds nothing. So when
+  `Read-ClipboardEntry` (reading the clipboard itself, no `-Data`) gets neither text nor an image although
+  `PsClip.Native.ClipboardHasTextOrImage` (asks without opening the clipboard) says there is one, it throws, and
+  `Receive-ClipboardChange` reads that change again up to `$ClipboardReadRetries` times, `$ClipboardReadDelay` apart.
 - `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
   `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,

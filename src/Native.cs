@@ -26,6 +26,8 @@ namespace PsClip
         [DllImport("user32.dll")] static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extraInfo);
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);
         [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
+        [DllImport("user32.dll")] static extern bool IsClipboardFormatAvailable(uint format);
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterClipboardFormat(string name);
         [DllImport("dwmapi.dll")]
         static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
         [DllImport("kernel32.dll")] static extern IntPtr GlobalLock(IntPtr handle);
@@ -151,6 +153,21 @@ namespace PsClip
         // missing or larger than maxBytes. WinForms' DataObject.GetData deserializes custom formats
         // with BinaryFormatter - which runs code chosen by whoever put the data on the clipboard -
         // so custom formats must only be read with this method.
+        // Whether the clipboard holds text or an image that is not marked private - asked without opening the
+        // clipboard, so it also works while another program has it open. A read that found nothing although this
+        // says there is something was refused by such a program (Teams, remote desktop clients read every change).
+        public static bool ClipboardHasTextOrImage()
+        {
+            foreach (string marker in new string[] { "ExcludeClipboardContentFromMonitorProcessing",
+                "Clipboard Viewer Ignore", "CanIncludeInClipboardHistory" })
+            {
+                if (IsClipboardFormatAvailable(RegisterClipboardFormat(marker))) return false;
+            }
+            return IsClipboardFormatAvailable(13 /* CF_UNICODETEXT */) || IsClipboardFormatAvailable(8 /* CF_DIB */) ||
+                IsClipboardFormatAvailable(2 /* CF_BITMAP */) ||
+                IsClipboardFormatAvailable(RegisterClipboardFormat("PNG"));
+        }
+
         public static byte[] ReadFormatBytes(object dataObject, string formatName, int maxBytes)
         {
             ComDataObject data = dataObject as ComDataObject;

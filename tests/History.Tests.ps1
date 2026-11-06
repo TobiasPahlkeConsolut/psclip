@@ -238,6 +238,34 @@ Describe 'Receive-ClipboardChange' {
     }
 }
 
+Describe 'Receive-ClipboardChange while another program holds the clipboard' {
+    BeforeEach {
+        Reset-TestState
+        $script:Ui.List = [pscustomobject]@{ SelectedIndex = -1 }
+    }
+
+    It 'reads again a few times, then gives up on that change' {
+        Mock Read-ClipboardEntry { throw 'The clipboard was busy' }
+        Receive-ClipboardChange
+        $Ui.ClipboardTimer.Enabled | Should Be $true   # once more after the read delay
+        for ($i = 0; $i -lt 5; $i++) { Receive-PendingClipboardChange }   # the timer's ticks
+        Assert-MockCalled Read-ClipboardEntry -Scope It -Exactly 4   # the first read and three more
+        $Ui.ClipboardTimer.Enabled | Should Be $false
+    }
+
+    It 'records the entry as soon as a later read succeeds' {
+        $script:reads = 0
+        Mock Read-ClipboardEntry {
+            $script:reads++
+            if ($script:reads -lt 3) { throw 'The clipboard was busy' }
+            [PsClip.ClipEntry]::new('finally')
+        }
+        Receive-ClipboardChange
+        for ($i = 0; $i -lt 3; $i++) { Receive-PendingClipboardChange }
+        $State.History -join '|' | Should BeExactly 'finally'
+    }
+}
+
 Describe 'New-ClipboardData' {
     It 'puts text and formatting on the clipboard' {
         $data = New-ClipboardData (New-FormattedEntry 'bold' -Rtf '{\rtf1 {\b bold}}' -Html '<b>bold</b>')

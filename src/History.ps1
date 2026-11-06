@@ -8,9 +8,12 @@ using namespace System.Windows.Forms
 
 function Read-ClipboardEntry {
     # The clipboard as a history entry - text plus HTML/RTF formatting, or an image - or $null if
-    # there is neither or the source app marked the content as private.
-    param($Data = [Clipboard]::GetDataObject())
+    # there is neither or the source app marked the content as private. Reading the clipboard itself (no -Data),
+    # it throws when another program has the clipboard open, so that the caller can try again.
+    param($Data)
 
+    $fromClipboard = -not $PSBoundParameters.ContainsKey('Data')
+    if ($fromClipboard) { $Data = [Clipboard]::GetDataObject() }   # throws when the clipboard stays busy
     if ($null -eq $Data) { return $null }
 
     if ($Data.GetDataPresent('ExcludeClipboardContentFromMonitorProcessing') -or
@@ -34,7 +37,14 @@ function Read-ClipboardEntry {
     }
     # Text wins over an image (e.g. Excel offers copied cells as text and as a picture) - unless it is blank.
     if ([string]::IsNullOrWhiteSpace($text)) {
-        return Read-ClipboardImage $Data
+        $image = Read-ClipboardImage $Data
+        # Windows says there is text or an image (asked without opening the clipboard), but none could be read:
+        # another program had the clipboard open just then - Teams and remote desktop clients read every change.
+        $busy = $null -eq $image -and $null -eq $text -and $fromClipboard
+        if ($busy -and [PsClip.Native]::ClipboardHasTextOrImage()) {
+            throw [System.IO.IOException]::new('The clipboard was busy - another program had it open.')
+        }
+        return $image
     }
     if ($text.Length -gt $MaxEntryLength) {
         # Before asking for the formatting: the source app renders it only on request, which can take
@@ -111,13 +121,23 @@ function Receive-PendingClipboardChange {
 function Receive-ClipboardChange {
     # The clipboard change caused by pasting an entry is not recorded again: the entry is already
     # in the history, and a plain-text paste must not replace its formatting.
-    if ([PsClip.Native]::GetClipboardSequenceNumber() -eq $State.OwnClipboardSequence) { return }
+    $sequence = [PsClip.Native]::GetClipboardSequenceNumber()
+    if ($sequence -eq $State.OwnClipboardSequence) { return }
 
     try {
         $entry = Read-ClipboardEntry
     }
     catch {
+        # Usually another program had the clipboard open for a moment: read it again shortly - a few times per
+        # change, so a clipboard that stays busy does not keep psclip busy.
         Write-Verbose "Could not read the clipboard: $($_.Exception.Message)"
+        if ($State.ClipboardRetry.Sequence -ne $sequence) {
+            $State.ClipboardRetry = @{ Sequence = $sequence; Count = 0 }
+        }
+        if ($State.ClipboardRetry.Count -lt $ClipboardReadRetries) {
+            $State.ClipboardRetry.Count++
+            Request-ClipboardRead
+        }
         return
     }
     if ($null -eq $entry) { return }
