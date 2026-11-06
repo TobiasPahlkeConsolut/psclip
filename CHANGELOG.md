@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Shorter README; the details are in `docs/`: install, usage, options, limitations, development
+- Saving the pinned entries no longer fails now and then ("Could not save the pinned entries") when a virus scanner
+  or backup program holds the file for a moment: psclip tries again briefly
+
 ## 1.1.0 - 2026-11-06
 
 - **Easier to read**: every entry shows two lines - line breaks stay, long text wraps and ends with "..." -, every

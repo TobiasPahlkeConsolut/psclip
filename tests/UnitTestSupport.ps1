@@ -42,6 +42,23 @@ namespace PsClipTest
         public int QueryGetData(ref FORMATETC f) { return inner.QueryGetData(ref f); }
         public void SetData(ref FORMATETC f, ref STGMEDIUM m, bool r) { inner.SetData(ref f, ref m, r); }
     }
+
+    public static class FileLock
+    {
+        // Holds a file open without sharing for a while, released by another thread - like a virus scanner.
+        public static void HoldFor(string path, int milliseconds)
+        {
+            System.IO.FileStream stream = System.IO.File.Open(path, System.IO.FileMode.Open,
+                System.IO.FileAccess.Read, System.IO.FileShare.None);
+            System.Threading.Thread thread = new System.Threading.Thread(delegate ()
+            {
+                System.Threading.Thread.Sleep(milliseconds);
+                stream.Dispose();
+            });
+            thread.IsBackground = true;
+            thread.Start();
+        }
+    }
 }
 '@
 }

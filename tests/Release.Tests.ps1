@@ -25,11 +25,16 @@ Describe 'Version' {
         $newest | Should Match "^## $([regex]::Escape($version)) - \d{4}-\d{2}-\d{2}$"
     }
 
-    It "is the one in the README's install example" {
-        $readme = [IO.File]::ReadAllText((Join-Path $repository 'README.md'))
-        $named = @([regex]::Matches($readme, 'psclip-(\d+\.\d+\.\d+)\.zip') | ForEach-Object { $_.Groups[1].Value })
-        $named.Count | Should BeGreaterThan 0
-        @($named | Where-Object { $_ -ne $version }) -join ', ' | Should BeExactly ''
+    It 'is the one in the install examples of the README and the docs' {
+        $pages = @(Join-Path $repository 'README.md') + @(Get-ChildItem (Join-Path $repository 'docs') -Filter '*.md' |
+            ForEach-Object { $_.FullName })
+        $named = foreach ($page in $pages) {
+            $text = [IO.File]::ReadAllText($page)
+            [regex]::Matches($text, 'psclip-(\d+\.\d+\.\d+)\.zip') |
+                ForEach-Object { "$(Split-Path -Leaf $page): $($_.Groups[1].Value)" }
+        }
+        @($named).Count | Should BeGreaterThan 1   # README and docs\install.md
+        @($named | Where-Object { $_ -notlike "*: $version" }) -join ', ' | Should BeExactly ''
     }
 }
 

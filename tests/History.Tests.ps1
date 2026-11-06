@@ -576,6 +576,27 @@ Describe 'Saved pinned entries (-KeepPinned)' {
         Test-Path -LiteralPath $State.PinnedFile | Should Be $false
     }
 
+    It 'tries again while another program holds the file for a moment (a virus scanner)' {
+        Add-Entries 'a', 'b'
+        Switch-ClipboardPin (Get-Entry 'a')
+        [PsClipTest.FileLock]::HoldFor($State.PinnedFile, 150)
+        Switch-ClipboardPin (Get-Entry 'b')
+        Assert-MockCalled Show-TrayWarning -Times 0 -Exactly -Scope It
+        (Read-SavedPins) -join '|' | Should BeExactly 'a|b'
+    }
+
+    It 'gives up after a moment when the file stays in use, and says so' {
+        Add-Entries 'a', 'b'
+        Switch-ClipboardPin (Get-Entry 'a')
+        [PsClipTest.FileLock]::HoldFor($State.PinnedFile, 1500)
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        Switch-ClipboardPin (Get-Entry 'b')
+        $watch.ElapsedMilliseconds | Should BeLessThan 1200
+        Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It
+        Start-Sleep -Milliseconds 1500   # until the lock is gone again
+        (Read-SavedPins) -join '|' | Should BeExactly 'a'   # the last saved version is intact
+    }
+
     It 'finds a pinned entry again when its text is copied after the start' {
         Add-Entries 'a'
         Switch-ClipboardPin (Get-Entry 'a')

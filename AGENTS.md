@@ -5,7 +5,9 @@ Guidance for coding agents (Claude Code, Codex, Copilot, ...) working on this re
 ## Project
 
 psclip: a minimal clipboard history for Windows, written in Windows PowerShell 5.1 with a little C#.
-See [README.md](README.md) for features and usage.
+See [README.md](README.md) for features and usage - a short overview; the details are in `docs/*.md`. When behavior
+changes, update the page it belongs to (install, usage, options, limitations, development) and keep the README short:
+features, quick install, key table, links.
 
 | File                              | Purpose                                                              |
 | --------------------------------- | -------------------------------------------------------------------- |
@@ -27,7 +29,7 @@ See [README.md](README.md) for features and usage.
 | `tests/Test-ClipboardManager.ps1` | End-to-end test on the real desktop                                  |
 | `tests/New-DocsScreenshots.ps1`   | Takes the README screenshots (`docs/*.png`) with sample content      |
 | `tests/TestSupport.ps1`           | Window helpers shared by the two scripts above                       |
-| `docs/`                           | Screenshots for the README                                           |
+| `docs/`                           | The documentation (`install.md`, `usage.md`, `options.md`, `limitations.md`, `development.md`) and its screenshots |
 | `CHANGELOG.md`                    | Changes per version - also the GitHub release notes                  |
 | `tools/New-ReleaseZip.ps1`        | Builds `dist/psclip-<version>.zip` (only the files users need) and the release text |
 | `tools/Invoke-Lint.ps1`           | Code check with PSScriptAnalyzer (see Style)                         |
@@ -107,7 +109,9 @@ See [README.md](README.md) for features and usage.
   (`pinned-<InstanceName>.dat` for other instances, e.g. the end-to-end test's), ignored by git.
   `PsClip.PinnedStore` writes its own binary format - never use a general-purpose deserializer (BinaryFormatter,
   CliXml) for it - encrypted with DPAPI (CurrentUser scope plus entropy; hence `System.Security` in `Add-Type`), via
-  a temporary file (flushed to the disk) and `File.Replace`. Strings are stored as raw UTF-16 so that every text
+  a temporary file (flushed to the disk) and `File.Replace`. Sharing violations (a virus scanner holding the file
+  right after it was written - about 1 in 50 quick saves here) are retried briefly (`RetryWhileInUse`).
+  Strings are stored as raw UTF-16 so that every text
   comes back exactly (`SameContent`), images keep their PNG bytes (`ClipEntry.FromPng`) and their recognized text;
   images saved before it was recognized are queued again. **A file that could not be read is never overwritten or
   deleted**: `PinnedStore.Load` throws an `InvalidDataException` (short message for the user) when it cannot be
@@ -261,15 +265,16 @@ See [README.md](README.md) for features and usage.
 `Install.ps1` starts psclip with three defaults of its own (`$InstallDefaults`: `-MaxMemory 500MB`,
 `-OpenAt TextCursor`, `-KeepPinned`), merged with the given parameters by `Get-InstallSettings` before
 `Get-ShortcutArguments` builds the command line; `-KeepPinned:$false` turns that one off. `ClipboardManager.ps1`'s own
-defaults stay minimal (100 MB, mouse pointer, nothing saved). Keep README "Options" and both help texts in sync.
+defaults stay minimal (100 MB, mouse pointer, nothing saved). Keep `docs/options.md` and both help texts in sync.
 
 ## Releases
 
 Version numbers are `major.minor.patch`. For a release:
 
 1. Set the version in `ClipboardManager.ps1` (`$PsClipVersion` and the first line of `.NOTES`) and rename
-   `## Unreleased` at the top of `CHANGELOG.md` to `## <version> - <date>` - `tests/Release.Tests.ps1` checks that
-   all three match. Between releases, note user-visible changes under `## Unreleased`.
+   `## Unreleased` at the top of `CHANGELOG.md` to `## <version> - <date>`, and the ZIP name in the install examples
+   (README, `docs/install.md`) - `tests/Release.Tests.ps1` checks that they all match. Between releases, note
+   user-visible changes under `## Unreleased`.
 2. Unit tests, end-to-end test in both themes (ask the owner first, see above), screenshots if the look changed.
 3. Optional dry run of the workflow's build step: `.\tools\New-ReleaseZip.ps1 -NotesFile dist\release-notes.md
    -ExpectedVersion <version>` -> `dist\psclip-<version>.zip` (one `psclip` folder: app, installer, `src`, `docs`,
