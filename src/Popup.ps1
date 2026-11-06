@@ -74,12 +74,16 @@ function Get-PopupLocation {
 }
 
 function Reset-PopupSize {
-    # The popup always opens at the configured size (plus the preview, if shown); resizing it by
-    # hand lasts until it closes.
-    $logicalSize = $PopupSizes[$State.PopupSize]
-    $height = [int]($logicalSize.Height * $Ui.Scale)
+    # The popup always opens at the configured size - the list shows its number of rows - plus the preview, if
+    # shown, but never taller than the screen; resizing it by hand lasts until it closes.
+    $popupSize = $PopupSizes[$State.PopupSize]
+    $height = $Ui.SearchPanel.Height + $popupSize.Rows * $Ui.List.ItemHeight + $Ui.Status.Height
     if ($State.PreviewVisible) { $height += $Ui.Preview.Height + $Ui.PreviewSplitter.Height }
-    $Ui.Form.ClientSize = [Size]::new([int]($logicalSize.Width * $Ui.Scale), $height)
+    $form = $Ui.Form
+    $frame = $form.Height - $form.ClientSize.Height   # title bar and borders
+    $screenHeight = [Screen]::FromPoint([Cursor]::Position).WorkingArea.Height
+    $height = [Math]::Min($height, $screenHeight - $frame)
+    $form.ClientSize = [Size]::new([int]($popupSize.Width * $Ui.Scale), $height)
 }
 
 function Move-PopupIntoScreen {
@@ -214,6 +218,7 @@ function Hide-Popup {
     $State.Filtered = [List[PsClip.ClipEntry]]::new()
     $State.FilteredPinnedCount = 0
     $State.FoundCount = 0
+    $State.FilterTerms = [string[]]@()
 }
 
 function Switch-Popup {
@@ -233,6 +238,7 @@ function Update-PopupList {
     # Filtering and the list lines are done in C#: the history may hold many thousands of entries.
     # Filling a list box takes long with that many, so it shows only the first MaxListItems.
     $terms = $Ui.Search.Text.Split([char[]]@(' ', "`t"), [StringSplitOptions]::RemoveEmptyEntries)
+    $State.FilterTerms = $terms   # highlighted in the rows (Write-ListItem)
     $found = [PsClip.ClipEntry]::Filter($State.Pinned, $terms)
     $pinnedCount = $found.Count
     $found.AddRange([PsClip.ClipEntry]::Filter($State.History, $terms))
@@ -275,7 +281,7 @@ function Update-StatusText {
     }
     $parts = [List[string]]::new()
     foreach ($part in $count, "Enter $action", 'Shift+Enter plain',
-        'F3 preview', 'Ctrl+P pin', 'F2 edit', 'Shift+Del remove') {
+        'F3 preview', 'Ctrl+P pin', 'F2 edit', 'Shift+Del remove', "Alt+number $action") {
         $parts.Add($part)
     }
 
@@ -415,7 +421,17 @@ function Invoke-PopupKey {
         ([Keys]::Delete) {
             if ($KeyEvent.Shift) { Remove-SelectedEntry } else { $handled = $false }
         }
-        default { $handled = $false }
+        default {
+            # Alt+1 ... Alt+9, Alt+0: the numbered rows. Not with Ctrl - Ctrl+Alt is AltGr, which types characters
+            # into the filter (e.g. AltGr+7 = '{' on a German keyboard).
+            $row = Get-QuickPasteRow $KeyEvent.KeyCode
+            if ($KeyEvent.Alt -and -not $KeyEvent.Control -and $row -ge 0) {
+                Invoke-NumberedEntry $row -PlainText:$KeyEvent.Shift
+            }
+            else {
+                $handled = $false
+            }
+        }
     }
 
     if ($handled) {
@@ -424,8 +440,30 @@ function Invoke-PopupKey {
     }
 }
 
+function Get-QuickPasteRow {
+    # The row a digit key stands for - 1-9 the first nine, 0 the tenth (0-based) - or -1 for other keys.
+    param([Keys]$KeyCode)
+
+    $code = [int]$KeyCode
+    if ($code -ge [int][Keys]::D1 -and $code -le [int][Keys]::D9) { return $code - [int][Keys]::D1 }
+    if ($code -ge [int][Keys]::NumPad1 -and $code -le [int][Keys]::NumPad9) { return $code - [int][Keys]::NumPad1 }
+    if ($KeyCode -eq [Keys]::D0 -or $KeyCode -eq [Keys]::NumPad0) { return 9 }
+    -1
+}
+
+function Invoke-NumberedEntry {
+    # Alt+number: selects that row and pastes it (copies it in copy mode).
+    param([int]$Row, [switch]$PlainText)
+
+    if ($Row -lt 0 -or $Row -ge $Ui.List.Items.Count) { return }
+    $Ui.List.SelectedIndex = $Row
+    Invoke-SelectedEntry -PlainText:$PlainText
+}
+
 function Write-ListItem {
-    # Owner-draw handler of the list: background, pin icon, text and a line below the pinned group.
+    # Owner-draw handler of the list: background (every second row slightly different), the number for
+    # Alt+number, pin icon, thumbnail, two lines of text with the filter's words highlighted, and a line below
+    # the pinned group.
     param([DrawItemEventArgs]$DrawEvent)
 
     $index = $DrawEvent.Index
@@ -437,11 +475,19 @@ function Write-ListItem {
     $isSelected = ($DrawEvent.State -band [DrawItemState]::Selected) -ne 0
     $isPinned = $index -lt $State.FilteredPinnedCount
 
-    $background = if ($isSelected) { $State.Gdi.SelBack } else { $State.Gdi.Back }
+    $background = if ($isSelected) { $State.Gdi.SelBack } elseif ($index % 2 -eq 1) { $State.Gdi.Stripe }
+        else { $State.Gdi.Back }
     $graphics.FillRectangle($background, $bounds)
 
+    if ($index -lt 10) {
+        $numberBounds = [Rectangle]::new($bounds.X, $bounds.Y, $Ui.NumberColumn, $bounds.Height)
+        $numberColor = if ($isSelected) { $colors.SelText } else { $colors.Muted }
+        [TextRenderer]::DrawText($graphics, [string](($index + 1) % 10), $Ui.SmallFont, $numberBounds, $numberColor,
+            $PinTextFlags)
+    }
+
     if ($isPinned) {
-        $pinBounds = [Rectangle]::new($bounds.X, $bounds.Y, $Ui.PinColumn, $bounds.Height)
+        $pinBounds = [Rectangle]::new($bounds.X + $Ui.NumberColumn, $bounds.Y, $Ui.PinColumn, $bounds.Height)
         $pinColor = if ($isSelected) { $colors.SelText } else { $colors.Accent }
         [TextRenderer]::DrawText($graphics, $Ui.PinGlyph, $Ui.PinFont, $pinBounds, $pinColor, $PinTextFlags)
 
@@ -453,7 +499,7 @@ function Write-ListItem {
     }
 
     # Images: the thumbnail in front of the text
-    $textLeft = $bounds.X + $Ui.PinColumn
+    $textLeft = $bounds.X + $Ui.TextIndent
     $entry = if ($index -lt $State.Filtered.Count) { $State.Filtered[$index] } else { $null }
     if ($null -ne $entry -and $entry.IsImage -and $null -ne $entry.Thumbnail) {
         $thumbnail = $entry.Thumbnail
@@ -464,6 +510,8 @@ function Write-ListItem {
 
     $textBounds = [Rectangle]::new($textLeft, $bounds.Y, $bounds.Right - $textLeft - $Ui.Padding, $bounds.Height)
     $textColor = if ($isSelected) { $colors.SelText } else { $colors.Text }
+    $highlight = if ($isSelected) { $colors.SelMatch } else { $colors.Match }
     $text = [string]$Ui.List.Items[$index]
-    [TextRenderer]::DrawText($graphics, $text, $DrawEvent.Font, $textBounds, $textColor, $EntryTextFlags)
+    [PsClip.ListPainter]::DrawText($graphics, $text, $DrawEvent.Font, $textBounds, $textColor, $highlight,
+        $State.FilterTerms)
 }

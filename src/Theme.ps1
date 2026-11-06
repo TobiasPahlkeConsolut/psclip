@@ -32,6 +32,7 @@ function Set-Theme {
         Back      = [SolidBrush]::new($colors.Back)
         SelBack   = [SolidBrush]::new($colors.SelBack)
         Separator = [Pen]::new($colors.Border)
+        Stripe    = [SolidBrush]::new($colors.Stripe)
     }
 
     $Ui.Form.BackColor = $colors.Back

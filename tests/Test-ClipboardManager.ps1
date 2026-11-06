@@ -137,7 +137,7 @@ try {
     # be on the list for a moment. The filter box is the edit control that is not read-only.
     $searchBox = [TestNative]::EditBox($popup, $false)
     $expected = "psclip test: alpha|psclip test: gamma & <special> chars|" +
-        "psclip test: beta line one $([char]0x21B5) line two|psclip test: initial entry"
+        "psclip test: beta line one`nline two|psclip test: initial entry"   # lines stay lines (two per row)
     $items = [TestNative]::ListBoxItems($listBox) -join '|'
     Add-Result 'Popup lists entries newest first' ($items -eq $expected) $items
     Save-WindowImage $popup "popup-$Theme.png"
@@ -149,6 +149,7 @@ try {
     Wait-Milliseconds 300
     $items = @([TestNative]::ListBoxItems($listBox))
     Add-Result 'Filter text narrows the list' ($items.Count -eq 1 -and $items[0] -like '*gamma*') ($items -join '|')
+    Save-WindowImage $popup "popup-filter-$Theme.png"   # the filter word is highlighted
     [TestNative]::SetText($searchBox, '')
     Wait-Milliseconds 200
 
@@ -173,6 +174,16 @@ try {
     Send-PostedKey $searchBox $keyEnter
     $pasted = Wait-Until { $targetBox.Text -eq 'psclip test: alpha' }
     Add-Result 'Enter pastes into the previously active window' $pasted "target text: '$($targetBox.Text)'"
+
+    # --- Alt+number pastes a numbered row: Alt+3 the third ---
+    $targetBox.Clear()
+    $thirdItem = ''
+    if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
+        $thirdItem = @([TestNative]::ListBoxItems($listBox))[2]
+        if (Test-Foreground $popup) { [TestNative]::PressKeys(0x12, 0x33) }   # Alt+3
+    }
+    $quickPasted = $thirdItem -and (Wait-Until { $targetBox.Text -eq $thirdItem })
+    Add-Result 'Alt+3 pastes the third row' $quickPasted "third row: '$thirdItem', target text: '$($targetBox.Text)'"
 
     # --- formatting: Enter pastes with formatting, Shift+Enter as plain text ---
     $boldText = 'psclip test: bold'
@@ -376,10 +387,11 @@ try {
     $saved = $editClosed -and $editedItem -like '*line two edited'
     Add-Result 'Esc saves the edited text and closes the window' $saved "closed: $editClosed, list: '$editedItem'"
 
-    # --- popup size: medium by default, manual resizing is reset on the next opening ---
-    $mediumHeight = [int](360 * $scale)
+    # --- popup size: medium (10 rows) by default, manual resizing is reset on the next opening ---
+    $openedRows = -1
     $openedHeight = $resizedHeight = $reopenedHeight = -1
     if (Show-TestPopup) {
+        $openedRows = [TestNative]::VisibleListRows($listBox)
         $openedHeight = [TestNative]::ClientHeightOf($popup)
         $outer = [TestNative]::RectOf($popup)
         $noMoveNoZOrderNoActivate = 0x16
@@ -393,27 +405,24 @@ try {
             Hide-TestPopup
         }
     }
-    Add-Result 'Popup opens at the medium size' ($openedHeight -eq $mediumHeight) `
-        "client height $openedHeight, expected $mediumHeight"
+    Add-Result 'Popup opens at the medium size: 10 rows' ($openedRows -eq 10) "rows $openedRows"
     Add-Result 'Manual resizing is reset on the next opening' `
         ($resizedHeight -gt $openedHeight -and $reopenedHeight -eq $openedHeight) `
         "resized $resizedHeight, reopened $reopenedHeight"
 
-    # --- tray menu: Window size > Large ---
-    $largeHeight = [int](540 * $scale)
+    # --- tray menu: Window size > Large (15 rows) ---
     $sizeChanged = $false
     if ((Open-TrayMenu) -and (Send-MenuKeys $keyDown, $keyDown, $keyDown, $keyDown, $keyDown, $keyRight)) {
         Wait-Milliseconds 300
         Save-MenuImages "tray-menu-$Theme"
         $sizeChanged = Send-MenuKeys $keyUp, $keyEnter   # Up wraps around to the last item, Large
     }
-    $openedHeight = -1
+    $largeRows = -1
     if ($sizeChanged -and (Show-TestPopup)) {
-        $openedHeight = [TestNative]::ClientHeightOf($popup)
+        $largeRows = [TestNative]::VisibleListRows($listBox)
         Hide-TestPopup
     }
-    Add-Result 'Tray menu: window size Large' ($openedHeight -eq $largeHeight) `
-        "client height $openedHeight, expected $largeHeight"
+    Add-Result 'Tray menu: window size Large, 15 rows' ($largeRows -eq 15) "rows $largeRows"
 
     # --- tray menu: Change hotkey dialog ---
     $dialog = [IntPtr]::Zero

@@ -15,7 +15,7 @@ Describe 'Text in images (OCR)' {
         $entry = New-ImageEntry
         $entry.OcrText = "Invoice 4711`r`nTotal 99"
         $entry.Matches(@('4711', 'total')) | Should Be $true
-        $expected = "Image 40 $([char]0xD7) 20  $([char]0xB7)  Invoice 4711$($LineBreakMark)Total 99"
+        $expected = "Image 40 $([char]0xD7) 20`nInvoice 4711 Total 99"
         $entry.ListText | Should BeExactly $expected
     }
 

@@ -22,7 +22,10 @@
         Ctrl+P                pin / unpin the entry; pinned entries stay on top and are never
                               dropped by MaxMemory or "Clear history"
         Shift+Delete          remove the entry
+        Alt+1 ... Alt+9, 0    paste the entry with that number (the first ten rows are numbered)
         Esc                   close
+
+    Each entry shows two lines; the filter's words are highlighted.
 
     Right-click an entry for the same actions. In the preview, text can be selected and copied
     (also the text recognized in an image); drag the bar on its top edge to make it bigger, or
@@ -63,9 +66,9 @@
     opens). "Dark mode" in the tray menu switches between dark and light.
 
 .PARAMETER Size
-    Size of the history popup: S, M (default) or L - mostly its height. The popup opens at this
-    size every time; resizing it by hand lasts until it closes. "Window size" in the tray menu
-    changes it.
+    Size of the history popup: S, M (default) or L - 6, 10 or 15 entries (as far as the screen
+    allows). The popup opens at this size every time; resizing it by hand lasts until it closes.
+    "Window size" in the tray menu changes it.
 
 .PARAMETER OpenAt
     Where the hotkey opens the popup: Mouse (default, at the mouse pointer) or TextCursor (below
@@ -187,6 +190,9 @@ $PsClipVersion = '1.0.1'
 $Palettes = @{
     Dark  = @{
         Back    = [Color]::FromArgb(32, 32, 32)
+        Stripe  = [Color]::FromArgb(38, 38, 38)         # every second row of the list
+        Match   = [Color]::FromArgb(110, 255, 196, 0)   # filter words in the list (translucent)
+        SelMatch = [Color]::FromArgb(125, 255, 255, 255) # ... in the selected row
         Input   = [Color]::FromArgb(45, 45, 45)
         Text    = [Color]::FromArgb(240, 240, 240)
         Muted   = [Color]::FromArgb(160, 160, 160)
@@ -198,6 +204,9 @@ $Palettes = @{
     }
     Light = @{
         Back    = [Color]::White
+        Stripe  = [Color]::FromArgb(246, 246, 246)
+        Match   = [Color]::FromArgb(130, 255, 200, 0)
+        SelMatch = [Color]::FromArgb(125, 255, 255, 255)
         Input   = [Color]::FromArgb(243, 243, 243)
         Text    = [Color]::FromArgb(26, 26, 26)
         Muted   = [Color]::FromArgb(110, 110, 110)
@@ -209,11 +218,12 @@ $Palettes = @{
     }
 }
 
-# Client size of the popup per -Size, at 100 % display scaling (mostly the height changes)
+# Size of the popup per -Size: width at 100 % display scaling, and the number of entries the list shows - the height
+# follows from the rows (two lines each), but never more than the screen holds (Reset-PopupSize)
 $PopupSizes = @{
-    S = [Size]::new(520, 240)
-    M = [Size]::new(560, 360)
-    L = [Size]::new(620, 540)
+    S = @{ Width = 520; Rows = 6 }
+    M = @{ Width = 560; Rows = 10 }
+    L = @{ Width = 620; Rows = 15 }
 }
 
 # Height of the preview (F3) at 100 % display scaling; the popup grows by it
@@ -237,10 +247,7 @@ $MaxListItems = 1000   # entries shown in the list at most; the filter searches 
 # RegisterHotKey modifier flags
 $HotkeyModifiers = @{ Alt = 0x1; Ctrl = 0x2; Control = 0x2; Shift = 0x4; Win = 0x8; Windows = 0x8 }
 
-$EntryTextFlags = [TextFormatFlags]'VerticalCenter, EndEllipsis, SingleLine, NoPrefix'
 $PinTextFlags = [TextFormatFlags]'HorizontalCenter, VerticalCenter, SingleLine, NoPrefix'
-$LineBreakMark = [PsClip.ClipEntry]::LineBreakMark   # shown instead of line breaks in the list
-
 #endregion
 
 #region Functions (src\*.ps1)
@@ -304,6 +311,7 @@ $State = @{
     PreviewDefault       = $Preview.IsPresent    # how the popup opens
     PreviewTextShare     = $PreviewTextShare     # text below an image; the bar between them changes it
     PreviewEntry         = $null                 # the entry the preview shows
+    FilterTerms          = [string[]]@()         # the filter's words, highlighted in the list
     EditEntry            = $null                 # F2: the entry the edit window opens for
     KeepAwake            = $false                # the tray menu switches it
     OcrQueue             = [Queue[PsClip.ClipEntry]]::new()   # images waiting for text recognition

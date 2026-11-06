@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace PsClip
@@ -28,8 +29,6 @@ namespace PsClip
         string imageHash;
         long thumbnailBytes;
 
-        // Shown instead of line breaks in the list
-        public const string LineBreakMark = " \u21B5 ";
         static readonly Regex LineBreaks = new Regex("\r\n?|\n");
         static readonly Regex Blanks = new Regex("[ \t]+");
 
@@ -150,12 +149,13 @@ namespace PsClip
                 {
                     if (!IsImage)
                     {
-                        listText = FormatPreview(text);
+                        listText = FormatListText(text, "\n");
                     }
                     else
                     {
                         listText = "Image " + Width + " \u00D7 " + Height;
-                        if (!string.IsNullOrEmpty(ocrText)) listText += "  \u00B7  " + FormatPreview(ocrText);
+                        // The recognized text on the second line
+                        if (!string.IsNullOrEmpty(ocrText)) listText += "\n" + FormatListText(ocrText, " ");
                     }
                 }
                 return listText;
@@ -172,16 +172,28 @@ namespace PsClip
 
         // One line for the list: line breaks shown as a mark, runs of blanks as one. Looks only at the
         // start of the text - entries can be megabytes long.
-        public static string FormatPreview(string value)
+        // The start of a text for the list, which shows two lines of each entry (ListPainter): its lines without
+        // indentation, empty lines and runs of blanks, joined with lineSeparator ("\n": a line of its own).
+        public static string FormatListText(string value, string lineSeparator)
         {
             if (value == null) return string.Empty;
-            int start = 0;
-            while (start < value.Length && char.IsWhiteSpace(value[start])) start++;
-            string preview = value.Substring(start, Math.Min(400, value.Length - start)).TrimEnd();
-            if (preview.Length > 300) preview = preview.Substring(0, 300);
-            preview = LineBreaks.Replace(preview, LineBreakMark);
-            return Blanks.Replace(preview, " ");
+            int first = 0;
+            while (first < value.Length && char.IsWhiteSpace(value[first])) first++;
+            // Only the start shows: two lines
+            string start = value.Substring(first, Math.Min(2000, value.Length - first));
+            StringBuilder result = new StringBuilder();
+            foreach (string line in LineBreaks.Split(start))
+            {
+                string trimmed = Blanks.Replace(line, " ").Trim();
+                if (trimmed.Length == 0) continue;
+                if (result.Length > 0) result.Append(lineSeparator);
+                result.Append(trimmed);
+                if (result.Length >= MaxListTextLength) break;
+            }
+            return result.Length > MaxListTextLength ? result.ToString(0, MaxListTextLength) : result.ToString();
         }
+
+        const int MaxListTextLength = 300;   // more than two lines of the widest popup hold
 
         public bool IsImage
         {

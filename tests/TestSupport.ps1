@@ -284,6 +284,13 @@ public static class TestNative
         return texts;
     }
 
+    // Rows a list box shows completely: its client height in rows (LB_GETITEMHEIGHT)
+    public static int VisibleListRows(IntPtr listBox)
+    {
+        int rowHeight = (int)SendMessage(listBox, 0x01A1, IntPtr.Zero, IntPtr.Zero);
+        return rowHeight > 0 ? ClientHeightOf(listBox) / rowHeight : 0;
+    }
+
     public static string[] ListBoxItems(IntPtr listBox)
     {
         int count = (int)SendMessage(listBox, LB_GETCOUNT, IntPtr.Zero, IntPtr.Zero);

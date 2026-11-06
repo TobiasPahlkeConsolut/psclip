@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Easier to read**: every entry shows two lines - line breaks stay, long text wraps and ends with "..." -, every
+  second row is slightly shaded, and the filter's words are highlighted; images get bigger thumbnails
+- **Numbered rows**: the first ten entries are numbered, `Alt+1` ... `Alt+9`, `Alt+0` paste them directly (with
+  `Shift` as plain text)
+- The popup sizes count entries: S, M and L show 6, 10 and 15 (as far as the screen allows)
+
 ## 1.0.1 - 2026-11-05
 
 - README: install to `%LOCALAPPDATA%\tools\psclip` instead of Documents, which OneDrive often syncs

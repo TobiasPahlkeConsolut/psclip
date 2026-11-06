@@ -37,7 +37,9 @@ function Initialize-Ui {
         $Ui.PinFont = $Ui.Font
         $Ui.PinGlyph = '*'
     }
-    $Ui.PinColumn = [int](26 * $Ui.Scale)
+    $Ui.NumberColumn = [int](16 * $Ui.Scale)   # 1-9, 0 in front of the first ten rows (Alt+number)
+    $Ui.PinColumn = [int](22 * $Ui.Scale)
+    $Ui.TextIndent = $Ui.NumberColumn + $Ui.PinColumn   # entry text, filter text and preview start here
     $Ui.Padding = [int](8 * $Ui.Scale)
 }
 
@@ -74,7 +76,7 @@ function New-PopupWindow {
 
     $searchPanel = [Panel]::new()
     $searchPanel.Dock = 'Top'
-    $searchPanel.Padding = [Padding]::new($Ui.PinColumn, $Ui.Padding, $Ui.Padding, $Ui.Padding)
+    $searchPanel.Padding = [Padding]::new($Ui.TextIndent, $Ui.Padding, $Ui.Padding, $Ui.Padding)
     $searchPanel.Height = $search.PreferredHeight + 2 * $Ui.Padding
     $searchPanel.Controls.Add($search)
 
@@ -83,7 +85,7 @@ function New-PopupWindow {
     $list.IntegralHeight = $false
     $list.BorderStyle = 'None'
     $list.DrawMode = 'OwnerDrawFixed'
-    $list.ItemHeight = $Ui.Font.Height + [int](10 * $scale)
+    $list.ItemHeight = 2 * $Ui.Font.Height + [int](6 * $scale)   # two lines per entry (ListPainter)
     $Ui.ThumbnailHeight = $list.ItemHeight - [int](6 * $scale)
     $list.ContextMenuStrip = New-ListMenu
 
@@ -99,7 +101,7 @@ function New-PopupWindow {
     $preview = [Panel]::new()
     $preview.Dock = 'Bottom'
     $preview.Height = [int]($PreviewHeight * $scale)
-    $preview.Padding = [Padding]::new($Ui.PinColumn, [int]($Ui.Padding / 2), $Ui.Padding, $Ui.Padding)
+    $preview.Padding = [Padding]::new($Ui.TextIndent, [int]($Ui.Padding / 2), $Ui.Padding, $Ui.Padding)
     $preview.Visible = $State.PreviewVisible
 
     $previewInfo = [Label]::new()

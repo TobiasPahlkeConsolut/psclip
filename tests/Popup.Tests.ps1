@@ -232,7 +232,7 @@ Describe 'Update-StatusText' {
     It 'shows every hint when there is room' {
         $Ui.Status.Width = 2000
         Update-StatusText
-        $Ui.Status.Text | Should Match 'F3 preview.+F2 edit.+Shift\+Del remove$'
+        $Ui.Status.Text | Should Match 'F3 preview.+F2 edit.+Shift\+Del remove.+Alt\+number copy$'
     }
 
     It 'leaves out the last hints when the popup is narrow, but keeps the count' {
@@ -304,12 +304,48 @@ Describe 'Invoke-PopupKey' {
         $plain.Handled | Should Be $false
     }
 
+    It 'pastes the numbered rows with Alt+1 ... Alt+9 and Alt+0, also from the number pad' {
+        Mock Invoke-NumberedEntry {}
+        Invoke-PopupKey (New-KeyEvent 'Alt, D1')
+        Invoke-PopupKey (New-KeyEvent 'Alt, D0')
+        Invoke-PopupKey (New-KeyEvent 'Alt, NumPad3')
+        Invoke-PopupKey (New-KeyEvent 'Alt, Shift, D2')
+        Assert-MockCalled Invoke-NumberedEntry -Scope It -Exactly 1 -ParameterFilter { $Row -eq 0 -and -not $PlainText }
+        Assert-MockCalled Invoke-NumberedEntry -Scope It -Exactly 1 -ParameterFilter { $Row -eq 9 }
+        Assert-MockCalled Invoke-NumberedEntry -Scope It -Exactly 1 -ParameterFilter { $Row -eq 2 }
+        Assert-MockCalled Invoke-NumberedEntry -Scope It -Exactly 1 -ParameterFilter { $Row -eq 1 -and $PlainText }
+    }
+
+    It 'lets digits and AltGr+digit (Ctrl+Alt: e.g. { on a German keyboard) through to the filter box' {
+        Mock Invoke-NumberedEntry {}
+        $digit = New-KeyEvent 'D7'
+        $altGr = New-KeyEvent 'Control, Alt, D7'
+        Invoke-PopupKey $digit
+        Invoke-PopupKey $altGr
+        Assert-MockCalled Invoke-NumberedEntry -Scope It -Exactly 0
+        $digit.Handled | Should Be $false
+        $altGr.Handled | Should Be $false
+    }
+
     It 'edits with F2' {
         Mock Edit-SelectedEntry {}
         $f2 = New-KeyEvent 'F2'
         Invoke-PopupKey $f2
         Assert-MockCalled Edit-SelectedEntry -Scope It -Exactly 1
         $f2.Handled | Should Be $true
+    }
+}
+
+Describe 'Invoke-NumberedEntry (Alt+number)' {
+    It 'selects the numbered row and pastes it - if there is such a row' {
+        Reset-TestState
+        $script:Ui.List = [pscustomobject]@{ Items = @('a', 'b', 'c'); SelectedIndex = 0 }
+        Mock Invoke-SelectedEntry {}
+        Invoke-NumberedEntry 2 -PlainText
+        $Ui.List.SelectedIndex | Should Be 2
+        Assert-MockCalled Invoke-SelectedEntry -Scope It -Exactly 1 -ParameterFilter { $PlainText }
+        Invoke-NumberedEntry 5
+        Assert-MockCalled Invoke-SelectedEntry -Scope It -Exactly 1
     }
 }
 
@@ -389,10 +425,10 @@ Describe 'Filter (ClipEntry.Matches)' {
     }
 }
 
-Describe 'List line (ClipEntry.ListText)' {
-    It 'shows line breaks as a mark and collapses spaces and tabs' {
-        $expected = 'first' + $LineBreakMark + 'second' + $LineBreakMark + 'third end'
-        ([PsClip.ClipEntry]::new("  first`r`nsecond`n`tthird   end  ")).ListText | Should BeExactly $expected
+Describe 'List text (ClipEntry.ListText)' {
+    It 'keeps lines as lines, without indentation, empty lines and runs of blanks' {
+        $text = "  first`r`n`r`n   second`n`tthird   end  "
+        ([PsClip.ClipEntry]::new($text)).ListText | Should BeExactly "first`nsecond`nthird end"
     }
 
     It 'cuts long text to 300 characters' {
@@ -400,13 +436,51 @@ Describe 'List line (ClipEntry.ListText)' {
     }
 
     It 'skips long leading whitespace' {
-        ([PsClip.ClipEntry]::new((' ' * 1000) + 'text')).ListText | Should BeExactly 'text'
+        ([PsClip.ClipEntry]::new((' ' * 5000) + 'text')).ListText | Should BeExactly 'text'
     }
 
-    It 'is renewed when the text in an image has been recognized' {
+    It 'shows the recognized text of an image on the second line once it is known' {
         $entry = New-ImageEntry -Width 40 -Height 20
         $entry.ListText | Should BeExactly "Image 40 $([char]0xD7) 20"
-        $entry.OcrText = 'found'
-        $entry.ListText | Should Match 'found$'
+        $entry.OcrText = "found`r`ntwice"
+        $entry.ListText | Should BeExactly "Image 40 $([char]0xD7) 20`nfound twice"
+    }
+}
+
+Describe 'Filter words in the list (ListPainter.FindMatches)' {
+    function Get-Ranges {
+        param([string]$Text, [string[]]$Terms, [int]$Max = 32)
+        $ranges = [PsClip.ListPainter]::FindMatches($Text, $Terms, $Max)
+        @($ranges | ForEach-Object { "$($_.First)+$($_.Length)" }) -join ' '
+    }
+
+    It 'finds every occurrence of every word, case-insensitive like the filter' {
+        Get-Ranges 'Invoice 4711, invoice 4712' @('INVOICE', '4712') | Should BeExactly '0+7 14+7 22+4'
+    }
+
+    It 'merges overlapping and touching matches into one range' {
+        Get-Ranges 'abcdef' @('abc', 'bcd', 'def') | Should BeExactly '0+6'
+    }
+
+    It 'finds nothing without words, and keeps at most the given number of ranges' {
+        Get-Ranges 'text' @() | Should BeExactly ''
+        Get-Ranges 'a a a a a' @('a') -Max 2 | Should BeExactly '0+1 2+1'
+    }
+}
+
+Describe 'Window size (Reset-PopupSize)' {
+    It 'fits the configured number of rows between the filter box and the status line' {
+        Reset-TestState
+        $script:Ui.Scale = 1.0
+        $script:Ui.SearchPanel = [pscustomobject]@{ Height = 40 }
+        $script:Ui.Status = [pscustomobject]@{ Height = 25 }
+        $script:Ui.List = [pscustomobject]@{ ItemHeight = 42 }
+        $script:Ui.Form = [pscustomobject]@{ Height = 330; ClientSize = [System.Drawing.Size]::new(300, 300) }
+        $State.PreviewVisible = $false
+        Reset-PopupSize
+        $Ui.Form.ClientSize | Should Be ([System.Drawing.Size]::new(560, 40 + 10 * 42 + 25))   # M: 10 rows
+        $State.PopupSize = 'S'
+        Reset-PopupSize
+        $Ui.Form.ClientSize.Height | Should Be (40 + 6 * 42 + 25)
     }
 }

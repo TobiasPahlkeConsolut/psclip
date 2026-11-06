@@ -27,7 +27,9 @@ The history lives in memory only and is gone when the script exits; only pinned 
 - **Pin** entries to the top - pinned entries are never dropped and survive "Clear history"; with *Keep pinned
   entries* (tray menu or `-KeepPinned`) they also survive a restart (saved encrypted for your Windows account)
 - **Dark mode** (default) or light mode, switchable from the tray menu
-- **Three popup sizes** (S / M / L) - the popup always opens at the chosen size
+- **Easy to read**: two lines per entry, every second row slightly shaded, the filter's words highlighted
+- **Numbered rows**: `Alt+1` ... `Alt+9`, `Alt+0` paste the first ten entries directly
+- **Three popup sizes** (S / M / L: 6, 10 or 15 entries) - the popup always opens at the chosen size
 - **Configurable hotkey** - as a parameter or at runtime from the tray menu
 - Skips content that password managers mark as private
 - **Keep awake** (optional, unrelated to the clipboard): presses the F15 key when you have been idle for 30 seconds,
@@ -131,6 +133,7 @@ Press the hotkey anywhere. The popup opens at the mouse pointer, or - with *Open
 | `F2`                           | Edit the text in a window of its own; `Esc` saves and closes it (changed text loses its formatting) |
 | `Ctrl+P`                       | Pin / unpin the entry                            |
 | `Shift+Delete`                 | Remove the entry                                 |
+| `Alt+1` ... `Alt+9`, `Alt+0`   | Paste the entry with that number (the first ten rows are numbered); with `Shift` as plain text |
 | `Esc`, click elsewhere         | Close                                            |
 
 Words from a screenshot find it - here "timed out", with the preview (`F3`) showing the image and the recognized
@@ -213,7 +216,7 @@ The parameters of `ClipboardManager.ps1`; `Install.ps1` passes them on to the sh
 | ------------------- | -------- | --------------------------------------------------------------------------- |
 | `-Hotkey`           | `Ctrl+Ö` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
 | `-Theme`            | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                    |
-| `-Size`             | `M`      | Popup size `S`, `M` or `L` - mostly the height (about 6, 10 or 17 entries visible) |
+| `-Size`             | `M`      | Popup size `S`, `M` or `L`: 6, 10 or 15 entries (two lines each), as far as the screen allows |
 | `-OpenAt`           | `Mouse`  | Where the hotkey opens the popup: `Mouse` (pointer) or `TextCursor`         |
 | `-MaxMemory`        | `100MB`  | Memory the history may use: `100MB`, `500MB` or `1GB` (pinned entries count, but are never dropped) |
 | `-MaxEntryLength`   | `1000000`| Texts with more characters are not recorded                                 |

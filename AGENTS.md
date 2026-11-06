@@ -17,7 +17,7 @@ See [README.md](README.md) for features and usage.
 | `src/Ocr.ps1`                     | Text in images (Windows.Media.Ocr), in the background                |
 | `src/KeepAwake.ps1`               | Keep awake (unrelated to the clipboard)                              |
 | `src/Window.ps1`                  | Building the popup window, the menus and the tray icon               |
-| `src/*.cs`                        | C# helpers, compiled together with `Add-Type`: `Native` (Win32 calls), `ClipboardHost` (hidden window), `ClipEntry`, `MenuRenderer`, `Caret` (text cursor of another program), `PinnedStore` (the `-KeepPinned` file) |
+| `src/*.cs`                        | C# helpers, compiled together with `Add-Type`: `Native` (Win32 calls), `ClipboardHost` (hidden window), `ClipEntry`, `MenuRenderer`, `Caret` (text cursor of another program), `PinnedStore` (the `-KeepPinned` file), `ListPainter` (row text, highlights) |
 | `Install.ps1`                     | Creates/removes Start menu and autostart shortcuts                   |
 | `tests/<Part>.Tests.ps1`          | Unit tests per part file (Pester 3.4 syntax)                         |
 | `tests/UnitTestSupport.ps1`       | Shared unit-test setup: loads the app, `Reset-TestState`, helpers    |
@@ -156,7 +156,18 @@ See [README.md](README.md) for features and usage.
   unit tests use `New-OleData` (a COM forwarder) for it. Images go back on the clipboard with
   `SetData(Bitmap, $false, ...)`, not `SetImage` (which adds a serialized copy).
 - The popup is resized to the configured size (`$PopupSizes`, `-Size`) every time it opens (`Reset-PopupSize`);
-  manual resizing is intentionally temporary. The preview (`F3`, `$Ui.Preview`) is a bottom-docked panel; showing
+  manual resizing is intentionally temporary. The sizes are a width and a number of rows (S/M/L: 6/10/15): the
+  height is the filter box + rows x `ItemHeight` + the status line, capped at the screen's working area - so the
+  rows fit whatever the font size and display scaling (the end-to-end test counts them).
+- List rows are two lines high (`ItemHeight` = 2 x font height + padding), drawn by `Write-ListItem`: shaded
+  background on every second row (`Stripe`), the numbers 1-9, 0 for `Alt+number` on the first ten rows, pin icon,
+  thumbnail, and the text via `PsClip.ListPainter`. That one uses GDI+ for both measuring and drawing - word wrap,
+  only whole lines (`LineLimit`), "..." at the cut - so the highlighted filter words (`$State.FilterTerms`,
+  `MeasureCharacterRanges`) line up with the text; `TextRenderer` (GDI) would lay the text out differently.
+  `ClipEntry.ListText` keeps line breaks as `\n` (empty lines and indentation dropped); for images it is the size
+  plus the recognized text on the second line.
+- `Alt+number` must not react to Ctrl+Alt: that is AltGr, which types characters into the filter (AltGr+7 = `{` on
+  a German keyboard). The preview (`F3`, `$Ui.Preview`) is a bottom-docked panel; showing
   it makes the popup taller by its height (`Switch-Preview`, `Move-PopupIntoScreen`). Each opening resets it:
   hidden unless `-Preview` (`$State.PreviewDefault`), default height, default text share below an image.
 - The preview's drag bars are `Splitter`s: `$Ui.PreviewSplitter` on the preview's top edge (resizes the whole
