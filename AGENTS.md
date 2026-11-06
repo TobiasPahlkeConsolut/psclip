@@ -260,8 +260,10 @@ Version numbers are `major.minor.patch`. For a release:
    `## Unreleased` at the top of `CHANGELOG.md` to `## <version> - <date>` - `tests/Release.Tests.ps1` checks that
    all three match. Between releases, note user-visible changes under `## Unreleased`.
 2. Unit tests, end-to-end test in both themes (ask the owner first, see above), screenshots if the look changed.
-3. `.\tools\New-ReleaseZip.ps1` -> `dist\psclip-<version>.zip` (one `psclip` folder: app, installer, `src`, `docs`,
-   README, CHANGELOG, LICENSE; extracting it over an older one updates psclip and keeps `pinned.dat`).
+3. Optional dry run of the workflow's build step: `.\tools\New-ReleaseZip.ps1 -NotesFile dist\release-notes.md
+   -ExpectedVersion <version>` -> `dist\psclip-<version>.zip` (one `psclip` folder: app, installer, `src`, `docs`,
+   README, CHANGELOG, LICENSE; extracting it over an older one updates psclip and keeps `pinned.dat`). Delete `dist`
+   afterwards: the published ZIP is built by the workflow, a local copy only confuses.
 4. `.\tools\Invoke-Lint.ps1` (0 findings), then commit and push `main`.
 5. An annotated tag `v<version>` on that commit, pushed (`git push origin v<version>`): the workflow
    `.github/workflows/release.yml` builds the ZIP on GitHub's Windows runner and publishes the release - title
