@@ -35,6 +35,7 @@ features, quick install, key table, links.
 | `tools/Invoke-Lint.ps1`           | Code check with PSScriptAnalyzer (see Style)                         |
 | `PSScriptAnalyzerSettings.psd1`   | The PSScriptAnalyzer rules that do not fit psclip, with the reasons  |
 | `.github/workflows/release.yml`   | Publishes the GitHub release when a `v<version>` tag is pushed       |
+| `.github/ISSUE_TEMPLATE/`         | The bug report form (`bug_report.yml`; how to find the version and get the `-Verbose` log) |
 | `tests/Release.Tests.ps1`         | Version consistency and the content of the release ZIP               |
 | `LICENSE`                         | MIT License                                                          |
 

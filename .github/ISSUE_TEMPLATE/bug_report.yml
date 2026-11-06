@@ -1,0 +1,96 @@
+name: Bug report
+description: Something in psclip does not work as described
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please check [Limitations](https://github.com/TobiasPahlkeConsolut/psclip/blob/main/docs/limitations.md) first - some things are known.
+        **Do not paste anything private** - no clipboard contents, passwords or screenshots of confidential data.
+
+  - type: input
+    id: version
+    attributes:
+      label: psclip version
+      description: The first line of the `-Verbose` log (see below), the name of the ZIP you downloaded, or the first line of the Notes in `Get-Help .\ClipboardManager.ps1 -Full`.
+      placeholder: "1.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: windows
+    attributes:
+      label: Windows version
+      options:
+        - Windows 11
+        - Windows 10
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: keyboard
+    attributes:
+      label: Keyboard layout
+      description: Matters for hotkey problems.
+      placeholder: "German, US, ..."
+
+  - type: dropdown
+    id: started
+    attributes:
+      label: How psclip was started
+      options:
+        - Start menu or autostart shortcut (Install.ps1)
+        - ClipboardManager.ps1 directly
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: settings
+    attributes:
+      label: Settings
+      description: The parameters psclip runs with - for the shortcut, see its properties (Target) - and settings changed in the tray menu.
+      placeholder: "-OpenAt TextCursor -MaxMemory 500MB -KeepPinned, light mode"
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Including any message psclip showed at the tray icon.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Which program you copied from and pasted into matters - e.g. Word, Outlook, a browser, a terminal.
+      placeholder: |
+        1. Copy a formatted text in Word
+        2. Press the hotkey, select it, press Enter in Outlook
+        3. ...
+
+  - type: textarea
+    id: log
+    attributes:
+      label: Log (optional)
+      description: |
+        The log shows what psclip does - never what you copied. To get it, exit psclip in its tray menu, then in PowerShell in the psclip folder run `powershell -NoProfile -ExecutionPolicy Bypass -File .\ClipboardManager.ps1 -Verbose` (with your usual settings), reproduce the problem and copy the output here.
+      render: text
+
+  - type: checkboxes
+    id: private
+    attributes:
+      label: Privacy
+      options:
+        - label: Nothing private is in this report - no clipboard contents, passwords or confidential screenshots
+          required: true
