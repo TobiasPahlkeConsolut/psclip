@@ -64,7 +64,7 @@ Right-click an entry for the same actions, and the tray icon (a small blue clipb
 - [Limitations](docs/limitations.md)
 - [Development](docs/development.md) - how it works, tests, releases
 - [Changelog](CHANGELOG.md)
-- [Report a bug](https://github.com/TobiasPahlkeConsolut/psclip/issues/new?template=bug_report.yml)
+- [Report a bug](https://github.com/TobiasPahlkeConsolut/psclip/issues/new/choose) - choose *Bug report*
 
 ## License
 
