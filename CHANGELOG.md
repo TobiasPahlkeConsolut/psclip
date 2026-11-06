@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 - 2026-11-06
 
 - **Easier to read**: every entry shows two lines - line breaks stay, long text wraps and ends with "..." -, every
   second row is slightly shaded, and the filter's words are highlighted; images get bigger thumbnails

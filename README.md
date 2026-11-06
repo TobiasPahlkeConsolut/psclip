@@ -47,7 +47,7 @@ The history lives in memory only and is gone when the script exits; only pinned 
 then in a PowerShell window in your Downloads folder:
 
 ```powershell
-Expand-Archive .\psclip-1.0.1.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
+Expand-Archive .\psclip-1.1.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
 cd $env:LOCALAPPDATA\tools\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
