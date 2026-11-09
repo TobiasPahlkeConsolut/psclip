@@ -59,10 +59,15 @@ function New-SampleImage {
     $graphics.TextRenderingHint = 'ClearTypeGridFit'
     $graphics.Clear([System.Drawing.Color]::White)
     $graphics.FillRectangle([System.Drawing.Brushes]::Firebrick, 0, 0, 560, 44)
-    $graphics.DrawString('Deployment failed', [System.Drawing.Font]::new('Segoe UI Semibold', 14),
-        [System.Drawing.Brushes]::White, 16, 9)
-    $graphics.DrawString("Error 4711: connection to the server timed out.`nPlease try again later.",
-        [System.Drawing.Font]::new('Segoe UI', 13), [System.Drawing.Brushes]::Black, 16, 64)
+    # Sizes in pixels, not points: in points the text grows with the display scaling and runs off the image, so OCR
+    # would not see 'timed out'.
+    $titleFont = [System.Drawing.Font]::new('Segoe UI Semibold', 19, [System.Drawing.GraphicsUnit]::Pixel)
+    $textFont = [System.Drawing.Font]::new('Segoe UI', 17, [System.Drawing.GraphicsUnit]::Pixel)
+    $graphics.DrawString('Deployment failed', $titleFont, [System.Drawing.Brushes]::White, 16, 9)
+    $graphics.DrawString("Error 4711: connection to the server timed out.`nPlease try again later.", $textFont,
+        [System.Drawing.Brushes]::Black, 16, 64)
+    $titleFont.Dispose()
+    $textFont.Dispose()
     $graphics.Dispose()
     $bitmap
 }
