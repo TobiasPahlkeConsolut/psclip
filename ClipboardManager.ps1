@@ -6,7 +6,7 @@
     Records every text that is copied to the clipboard - with its formatting (HTML, RTF) - and
     every image (e.g. screenshots), and keeps the most recent entries in memory. Text in images
     is recognized in the background (Windows' built-in OCR), so the filter finds images by their
-    content too. Nothing is written to disk: the history is gone when the script exits - and so
+    content too. The history is never written to disk: it is gone when the script exits - and so
     are the pinned entries, unless "Keep pinned entries" (-KeepPinned) saves them.
 
     Press the hotkey (see -Hotkey) to open the history at the mouse pointer (or the text cursor,
@@ -32,7 +32,15 @@
     the bar between an image and its text. Sizes and F3 are reset when the popup opens again.
     Left-click the tray icon to open the history in copy-only mode; right-click it for "Clear
     history", the settings (hotkey, dark mode, window size, where the popup opens, memory limit,
-    keeping pinned entries) and "Exit". Settings changed there last until the script exits.
+    keeping pinned entries, keep awake), "Edit settings file..." and "Exit". Settings changed there
+    last until the script exits - unless there is a settings file.
+
+    Settings file: when settings.ini exists next to this script (Install.ps1 creates it, and so does
+    "Edit settings file..."), psclip reads its settings from it and saves the tray menu's changes to
+    it; saving it in an editor applies the changes at once. It holds a line "Name = value" for each
+    of the parameters Hotkey, Theme, Size, OpenAt, MaxMemory, KeepPinned, Preview, KeepAwake,
+    KeepAwakeSeconds and MaxEntryLength, e.g. "Theme = Light" or "KeepAwake = true". Parameters
+    given on the command line win over the file.
 
     Entries that the source application marks as private (password managers set the
     ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory formats) are
@@ -46,7 +54,7 @@
     Global hotkey, e.g. 'Ctrl+Shift+V', 'Ctrl+Alt+H' or 'Ctrl+F12'. The key part is a
     System.Windows.Forms.Keys name (V, F12, Space, Oemtilde, 1, ...) or the character printed
     on the key, such as an umlaut on a German keyboard. It can also be changed from the tray
-    menu; that change lasts until the script exits. Combinations that would get in the way of
+    menu (kept in the settings file, if there is one). Combinations that would get in the way of
     typing are refused: a plain key (except F1-F11, F13-F24), Shift plus a character key, and
     Ctrl+Alt plus a key that types a character with AltGr.
 
@@ -245,6 +253,63 @@ $ClipboardReadRetries = 3   # reads again after that delay while another program
 $MemoryLimits = [ordered]@{ '100MB' = 100MB; '500MB' = 500MB; '1GB' = 1GB }
 $MaxListItems = 1000   # entries shown in the list at most; the filter searches all of them
 
+# The settings file, settings.ini next to this script (src\Settings.ps1): each setting is also a parameter above, with
+# the same name and values - the command line wins. Type: Hotkey, Choice (one of Choices), Switch (true or false) or
+# Number (Minimum to Maximum). Comment: the lines written above it in a new file.
+$SettingDefinitions = [ordered]@{
+    Hotkey           = @{
+        Type    = 'Hotkey'
+        Comment = 'Hotkey that opens the history: Ctrl, Alt, Shift and/or Win plus a key, e.g. Ctrl+Shift+V or',
+            'Ctrl+F12. Ctrl+Oemtilde is Ctrl+O-umlaut on a German keyboard and Ctrl+` on a US one.'
+    }
+    Theme            = @{
+        Type    = 'Choice'
+        Choices = 'Dark', 'Light', 'Auto'
+        Comment = 'Dark, Light, or Auto (follows the Windows app theme)'
+    }
+    Size             = @{
+        Type    = 'Choice'
+        Choices = 'S', 'M', 'L'
+        Comment = 'Size of the popup: S, M or L (6, 10 or 15 entries)'
+    }
+    OpenAt           = @{
+        Type    = 'Choice'
+        Choices = 'Mouse', 'TextCursor'
+        Comment = 'Where the hotkey opens the popup: Mouse (at the mouse pointer) or TextCursor (below the text cursor)'
+    }
+    MaxMemory        = @{
+        Type    = 'Choice'
+        Choices = '100MB', '500MB', '1GB'
+        Comment = 'Memory the history may use: 100MB, 500MB or 1GB - the oldest unpinned entries are dropped'
+    }
+    KeepPinned       = @{
+        Type    = 'Switch'
+        Comment = 'Keep pinned entries: save them to pinned.dat (encrypted for your Windows account) and load them at',
+            'the start - true or false. false deletes pinned.dat.'
+    }
+    Preview          = @{
+        Type    = 'Switch'
+        Comment = 'Open the popup with the preview (F3) shown: true or false'
+    }
+    KeepAwake        = @{
+        Type    = 'Switch'
+        Comment = 'Keep awake: press the F15 key after KeepAwakeSeconds (1 to 3600) without mouse or keyboard input -',
+            'true or false'
+    }
+    KeepAwakeSeconds = @{ Type = 'Number'; Minimum = 1; Maximum = 3600 }
+    MaxEntryLength   = @{
+        Type    = 'Number'
+        Minimum = 1
+        Maximum = 100000000
+        Comment = 'Texts with more characters than this are not recorded (1 to 100000000)'
+    }
+}
+$SettingsFileHeader = @(
+    "# psclip settings. Change them here or in psclip's tray menu, which saves its changes to this file."
+    '# Saved changes apply at once. A setting that is missing or not valid gets its default; lines starting with #'
+    "# are comments. Settings given on psclip's command line win over this file. More: docs\options.md"
+)
+
 # RegisterHotKey modifier flags
 $HotkeyModifiers = @{ Alt = 0x1; Ctrl = 0x2; Control = 0x2; Shift = 0x4; Win = 0x8; Windows = 0x8 }
 
@@ -262,6 +327,7 @@ $PinTextFlags = [TextFormatFlags]'HorizontalCenter, VerticalCenter, SingleLine, 
 . (Join-Path $PSScriptRoot 'src\Ocr.ps1')
 . (Join-Path $PSScriptRoot 'src\KeepAwake.ps1')
 . (Join-Path $PSScriptRoot 'src\Window.ps1')
+. (Join-Path $PSScriptRoot 'src\Settings.ps1')
 
 #endregion
 
@@ -271,10 +337,25 @@ $PinTextFlags = [TextFormatFlags]'HorizontalCenter, VerticalCenter, SingleLine, 
 if ($MyInvocation.InvocationName -eq '.') { return }
 
 Write-Verbose "psclip $PsClipVersion"
-$hotkeySpec = ConvertFrom-HotkeyText $Hotkey   # fails early on an invalid hotkey
 if ($PSBoundParameters.ContainsKey('MaxItems') -or $PSBoundParameters.ContainsKey('MaxImages')) {
     Write-Verbose '-MaxItems and -MaxImages are ignored: the history is limited by -MaxMemory now.'
 }
+
+# The settings: given on the command line, else from the settings file (if there is one), else the defaults.
+$settingsFile = Get-SettingsFilePath $PSScriptRoot $InstanceName
+$givenSettings = @($PSBoundParameters.Keys | Where-Object { $SettingDefinitions.Contains($_) })
+$settingsWarning = ''
+try {
+    $fileSettings = Read-SettingsFile $settingsFile
+    if ($null -eq $fileSettings) { Write-Verbose "No $settingsFile - settings changed in the tray menu are not kept." }
+    else { Write-Verbose "Settings from $settingsFile." }
+}
+catch {
+    $fileSettings = $null
+    $settingsWarning = "$(Split-Path -Leaf $settingsFile) cannot be read: $($_.Exception.GetBaseException().Message)"
+}
+$startSettings = Get-StartSettings -Given $givenSettings -File $fileSettings
+$hotkeySpec = ConvertFrom-HotkeyText $startSettings.Hotkey   # fails early on an invalid -Hotkey
 
 # One instance per user session (per InstanceName)
 $mutex = [System.Threading.Mutex]::new($false, "Local\$InstanceName")
@@ -293,29 +374,36 @@ if (-not $ownsMutex) {
 $State = @{
     History              = [List[PsClip.ClipEntry]]::new()   # unpinned entries, newest first
     Pinned               = [List[PsClip.ClipEntry]]::new()   # pinned entries, in pin order
-    KeepPinned           = $KeepPinned.IsPresent # save the pinned entries; the tray menu switches it
+    KeepPinned           = $startSettings.KeepPinned   # save the pinned entries; the tray menu switches it
     PinnedFile           = Get-PinnedFilePath $PSScriptRoot $InstanceName   # where they are saved
     PinnedSaveFailed     = $false                # saving failed (reported once, not at every change)
     Filtered             = [List[PsClip.ClipEntry]]::new()   # entries currently shown in the popup
     FilteredPinnedCount  = 0
     FoundCount           = 0                     # entries matching the filter (more than shown: MaxListItems)
-    MemoryLimit          = @($MemoryLimits.Keys) -eq $MaxMemory | Select-Object -First 1   # e.g. '100MB'
+    MemoryLimit          = $startSettings.MaxMemory   # e.g. '100MB', a key of $MemoryLimits
+    MaxEntryLength       = $startSettings.MaxEntryLength   # longer texts are not recorded
     OwnClipboardSequence = 0                     # sequence number of the clipboard change caused by pasting
     ClipboardRetry       = @{ Sequence = 0; Count = 0 }   # reads again of a change the clipboard was busy for
     PasteTarget          = [IntPtr]::Zero        # window to paste into; zero = copy only
     HotkeySpec           = $hotkeySpec           # modifiers and key code, independent of the layout
     HotkeyText           = Format-HotkeySpec $hotkeySpec   # as shown to the user
     HotkeyActive         = $false
-    ThemeSetting         = $Theme                # Dark, Light or Auto; the tray menu switches it
-    PopupSize            = $Size                 # S, M or L; the tray menu changes it
-    OpenAt               = @('Mouse', 'TextCursor') -eq $OpenAt | Select-Object -First 1   # the tray menu changes it
-    PreviewVisible       = $Preview.IsPresent    # F3 switches it while the popup is open
-    PreviewDefault       = $Preview.IsPresent    # how the popup opens
+    ThemeSetting         = $startSettings.Theme  # Dark, Light or Auto; the tray menu switches it
+    PopupSize            = $startSettings.Size   # S, M or L; the tray menu changes it
+    OpenAt               = $startSettings.OpenAt # Mouse or TextCursor; the tray menu changes it
+    PreviewVisible       = $startSettings.Preview   # F3 switches it while the popup is open
+    PreviewDefault       = $startSettings.Preview   # how the popup opens
     PreviewTextShare     = $PreviewTextShare     # text below an image; the bar between them changes it
     PreviewEntry         = $null                 # the entry the preview shows
     FilterTerms          = [string[]]@()         # the filter's words, highlighted in the list
     EditEntry            = $null                 # F2: the entry the edit window opens for
-    KeepAwake            = $false                # the tray menu switches it
+    KeepAwake            = $startSettings.KeepAwake   # the tray menu switches it
+    KeepAwakeSeconds     = $startSettings.KeepAwakeSeconds
+    SettingsFile         = $settingsFile         # used only if it exists (src\Settings.ps1)
+    SettingsInFile       = $(if ($fileSettings) { $fileSettings.Values } else { @{} })   # as last read or written
+    SettingsGiven        = $givenSettings        # given on the command line: they win at every start
+    SettingsHintShown    = $false                # ... which the tray menu says once (Show-GivenSettingHint)
+    SettingsProblems     = ''                    # ignored lines of the file, as last reported
     OcrQueue             = [Queue[PsClip.ClipEntry]]::new()   # images waiting for text recognition
     OcrJob               = $null                 # the recognition in progress
     IsDark               = $null
@@ -332,6 +420,7 @@ try {
     New-TrayIcon
     Set-Theme (Test-DarkTheme)
     Start-ClipboardListener
+    Start-SettingsWatcher
     Initialize-KeepAwake
     Initialize-Ocr
 
@@ -345,6 +434,11 @@ try {
     # After Initialize-Ocr (queues images whose text is not recognized yet), before the clipboard is
     # read: a copied text equal to a pinned entry must find it.
     $warnings += @(Restore-PinnedList)
+    if ($settingsWarning) { $warnings += $settingsWarning }
+    if ($fileSettings) {
+        $State.SettingsProblems = Get-SettingsProblemMessage $fileSettings.Problems
+        if ($State.SettingsProblems) { $warnings += $State.SettingsProblems }
+    }
     try {
         Add-InitialClipboardEntry (Read-ClipboardEntry)
     }
@@ -364,6 +458,8 @@ finally {
     if ($Ui.ContainsKey('KeepAwakeTimer')) { $Ui.KeepAwakeTimer.Dispose() }
     if ($Ui.ContainsKey('OcrTimer')) { $Ui.OcrTimer.Dispose() }
     if ($Ui.ContainsKey('ClipboardTimer')) { $Ui.ClipboardTimer.Dispose() }
+    if ($Ui.ContainsKey('SettingsWatcher')) { $Ui.SettingsWatcher.Dispose() }
+    if ($Ui.ContainsKey('SettingsTimer')) { $Ui.SettingsTimer.Dispose() }
     if ($Ui.ContainsKey('Tray')) {
         $Ui.Tray.Visible = $false
         $Ui.Tray.Dispose()

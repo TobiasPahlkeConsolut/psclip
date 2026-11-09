@@ -11,7 +11,7 @@ function Initialize-KeepAwake {
     $timer.Interval = 1000
     $timer.add_Tick({ Invoke-KeepAwakeCheck })
     $Ui.KeepAwakeTimer = $timer
-    Set-KeepAwake $KeepAwake.IsPresent
+    Set-KeepAwake $State.KeepAwake   # as the settings say (-KeepAwake, the settings file)
 }
 
 function Set-KeepAwake {
@@ -34,5 +34,5 @@ function Invoke-KeepAwakeCheck {
 
 function Test-KeepAwakeDue {
     param([int]$IdleMilliseconds)
-    $IdleMilliseconds -ge $KeepAwakeSeconds * 1000
+    $IdleMilliseconds -ge $State.KeepAwakeSeconds * 1000
 }

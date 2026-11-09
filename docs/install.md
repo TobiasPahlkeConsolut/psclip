@@ -32,8 +32,10 @@ only be read on the computer that saved them.
 - It **does not copy anything**. psclip runs from the folder you put it in; keep that folder (or run `Install.ps1`
   again after moving it).
 - It creates a **Clipboard Manager** shortcut in your Start menu (`%APPDATA%\Microsoft\Windows\Start Menu\Programs`),
-  so you can start psclip like any app. Without other parameters, psclip then starts with a memory limit of 500 MB,
-  opens the popup at the text cursor and keeps pinned entries (see [Options](options.md)).
+  so you can start psclip like any app.
+- It writes psclip's settings to **`settings.ini`** in the same folder (see [Settings file](options.md#settings-file)).
+  A new one gets a memory limit of 500 MB, the popup at the text cursor and *Keep pinned entries* on; an existing one
+  keeps its settings, except those you give `Install.ps1`.
 - With `-Autostart` it creates the same shortcut in your Startup folder (`shell:startup`), so psclip starts when you
   sign in. Without `-Autostart`, an existing autostart shortcut is removed.
 - It starts psclip right away. If psclip is already running, it asks before restarting it (the history would be
@@ -41,14 +43,15 @@ only be read on the computer that saved them.
 - Everything is per user: no admin rights (it refuses to run as administrator), no registry entries, no services.
 - It needs Windows PowerShell 5.1 (`powershell.exe`), not PowerShell 7 (`pwsh`).
 
-Settings are passed on to the shortcuts:
+Settings given to `Install.ps1` go into `settings.ini`:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -KeepAwake
 ```
 
-Running `Install.ps1` again replaces the shortcuts, so this is also how you change settings permanently. Settings you
-leave out get their defaults again (see [Options](options.md)).
+Afterwards, change settings in psclip's tray menu - it saves them to `settings.ini` - or in the file itself (*Edit
+settings file...* in the tray menu): saved changes apply at once. Running `Install.ps1` again changes only the
+settings you give it.
 
 ## Execution policy
 
@@ -60,8 +63,10 @@ line cannot override. Where scripts are allowed anyway, `.\Install.ps1 -Autostar
 
 ## Updating
 
-Extract the new ZIP over the old `psclip` folder (or `git pull`) - your saved pinned entries (`pinned.dat`) stay - and
-run `Install.ps1` again with your settings; it restarts psclip. What changed is in the [changelog](../CHANGELOG.md).
+Extract the new ZIP over the old `psclip` folder (or `git pull`) - your settings (`settings.ini`) and saved pinned
+entries (`pinned.dat`) stay - and run `Install.ps1` again, without settings; it restarts psclip. Updating from 1.1 or
+older, whose shortcuts carried the settings: `Install.ps1` moves them from the old shortcut into a new
+`settings.ini`. What changed is in the [changelog](../CHANGELOG.md).
 
 ## Run without installing
 
@@ -88,5 +93,5 @@ conhost.exe --headless powershell.exe -NoProfile -File .\ClipboardManager.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Uninstall
 ```
 
-This stops a running instance and removes both shortcuts. Then delete the folder (with *Keep pinned entries* it also
-holds your saved pinned entries, `pinned.dat`).
+This stops a running instance and removes both shortcuts. Then delete the folder (it also holds your settings,
+`settings.ini`, and with *Keep pinned entries* your saved pinned entries, `pinned.dat`).

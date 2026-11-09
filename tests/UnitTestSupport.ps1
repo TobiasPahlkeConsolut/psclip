@@ -99,6 +99,9 @@ function New-OleData {
 $germanLayout = [PsClip.Native]::VirtualKeyOf([char]0xF6) -eq 0xC0
 $upperUmlaut = [string][char]0xD6
 
+# The settings file of the test state: a folder that does not exist, so no test writes a settings file by accident.
+$NoSettingsFile = Join-Path ([IO.Path]::GetTempPath()) 'psclip-unit-tests-no-such-folder\settings.ini'
+
 function Reset-TestState {
     # Minimal $State / $Ui as built by the Main region, with stand-ins for the tray controls.
     $script:State = @{
@@ -111,6 +114,7 @@ function Reset-TestState {
         FilteredPinnedCount  = 0
         FoundCount           = 0
         MemoryLimit          = '100MB'
+        MaxEntryLength       = 1000000
         OwnClipboardSequence = 0
         ClipboardRetry       = @{ Sequence = 0; Count = 0 }
         PasteTarget         = [IntPtr]::Zero
@@ -127,6 +131,12 @@ function Reset-TestState {
         FilterTerms         = [string[]]@()
         EditEntry           = $null
         KeepAwake           = $false
+        KeepAwakeSeconds    = 30
+        SettingsFile        = $script:NoSettingsFile   # never exists: nothing is saved unless a test sets a file
+        SettingsInFile      = @{}
+        SettingsGiven       = [string[]]@()
+        SettingsHintShown   = $false
+        SettingsProblems    = ''
         OcrQueue            = [System.Collections.Generic.Queue[PsClip.ClipEntry]]::new()
         OcrJob              = $null
         IsDark              = $null
@@ -143,10 +153,8 @@ function Reset-TestState {
     }
     $script:MemoryLimits = [ordered]@{ '100MB' = 100MB; '500MB' = 500MB; '1GB' = 1GB }
     $script:MaxListItems = 1000
-    $script:MaxEntryLength = 1000000
     $script:MaxImageBytes = 50MB
     $script:MaxPreviewLength = 100000
-    $script:KeepAwakeSeconds = 30
 }
 
 function Set-TestMemoryLimit {

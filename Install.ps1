@@ -9,52 +9,54 @@
     Terminal as the default terminal, 'powershell -WindowStyle Hidden' would leave an empty
     terminal window open.)
 
-    The installer's defaults differ from those of ClipboardManager.ps1 in three settings: a memory
-    limit of 500MB, the popup at the text cursor, and "Keep pinned entries" on. All other settings
-    are ClipboardManager.ps1's defaults.
+    The settings go to settings.ini in this folder, where psclip reads them and saves the changes
+    made in its tray menu - edit it with any text editor. A new settings.ini gets the installer's
+    defaults, which differ from those of ClipboardManager.ps1 in three settings: a memory limit of
+    500MB, the popup at the text cursor, and "Keep pinned entries" on. When updating from a version
+    whose shortcuts passed the settings themselves, those settings move into the new settings.ini.
+    An existing settings.ini keeps its settings; only the settings given here change in it.
 
     Nothing is copied: keep this folder where it is, or run Install.ps1 again after moving it.
-    Running it again replaces the shortcuts, so it is also the way to change the settings. If
-    psclip is already running, you are asked before it is restarted (its history would be lost).
+    If psclip is already running, you are asked before it is restarted (its history would be lost).
 
 .PARAMETER Autostart
     Also start the manager when you sign in to Windows. Without it, an existing autostart
     shortcut is removed.
 
 .PARAMETER Hotkey
-    Passed on to ClipboardManager.ps1, e.g. 'Ctrl+Alt+V'. Checked before anything is changed.
+    Written to settings.ini, e.g. 'Ctrl+Alt+V'. Checked before anything is changed.
 
 .PARAMETER MaxMemory
-    Passed on to ClipboardManager.ps1: memory the history may use, 100MB, 500MB (default here) or 1GB.
+    Written to settings.ini: memory the history may use, 100MB, 500MB (default here) or 1GB.
 
 .PARAMETER Theme
-    Passed on to ClipboardManager.ps1: Dark (default), Light or Auto.
+    Written to settings.ini: Dark (default), Light or Auto.
 
 .PARAMETER Size
-    Passed on to ClipboardManager.ps1: popup size S, M (default) or L.
+    Written to settings.ini: popup size S, M (default) or L.
 
 .PARAMETER OpenAt
-    Passed on to ClipboardManager.ps1: where the hotkey opens the popup, Mouse or TextCursor (default here).
+    Written to settings.ini: where the hotkey opens the popup, Mouse or TextCursor (default here).
 
 .PARAMETER Preview
-    Passed on to ClipboardManager.ps1: open the popup with the preview (F3) shown.
+    Written to settings.ini: open the popup with the preview (F3) shown.
 
 .PARAMETER KeepAwake
-    Passed on to ClipboardManager.ps1: start with "Keep awake" switched on.
+    Written to settings.ini: "Keep awake" switched on.
 
 .PARAMETER KeepAwakeSeconds
-    Passed on to ClipboardManager.ps1: idle seconds before "Keep awake" presses F15 (default 30).
+    Written to settings.ini: idle seconds before "Keep awake" presses F15 (default 30).
 
 .PARAMETER KeepPinned
-    Passed on to ClipboardManager.ps1: start with "Keep pinned entries" switched on - pinned entries
-    are saved encrypted to pinned.dat in this folder and survive restarts. On by default here;
-    -KeepPinned:$false leaves it off.
+    Written to settings.ini: "Keep pinned entries" switched on - pinned entries are saved encrypted
+    to pinned.dat in this folder and survive restarts. On by default here; -KeepPinned:$false
+    switches it off.
 
 .PARAMETER Force
     Restart a running psclip without asking.
 
 .PARAMETER Uninstall
-    Stops a running instance and removes both shortcuts.
+    Stops a running instance and removes both shortcuts (settings.ini and pinned.dat stay in this folder).
 
 .EXAMPLE
     .\Install.ps1 -Autostart
@@ -65,7 +67,7 @@
 .EXAMPLE
     .\Install.ps1 -MaxMemory 100MB -OpenAt Mouse -KeepPinned:$false
 
-    ClipboardManager.ps1's own defaults instead of the installer's: nothing is saved.
+    ClipboardManager.ps1's own defaults instead of the installer's: no pinned entries are saved.
 
 .EXAMPLE
     .\Install.ps1 -Uninstall
@@ -133,6 +135,7 @@ $shortcutName = 'Clipboard Manager.lnk'
 $startMenuShortcut = Join-Path ([Environment]::GetFolderPath('Programs')) $shortcutName
 $autostartShortcut = Join-Path ([Environment]::GetFolderPath('Startup')) $shortcutName
 $hostWindowTitle = 'PsClipboardManager'   # hidden window of a running instance (its InstanceName)
+$settingsFile = Join-Path $PSScriptRoot 'settings.ini'   # psclip's (Get-SettingsFilePath)
 
 # Where the installer's defaults differ from ClipboardManager.ps1's (which stays minimal when run by itself)
 $InstallDefaults = @{ MaxMemory = '500MB'; OpenAt = 'TextCursor'; KeepPinned = $true }
@@ -159,6 +162,31 @@ public static class InstallNative
         GetWindowThreadProcessId(hwnd, out pid);
         return (int)pid;
     }
+
+    [DllImport("shell32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern IntPtr CommandLineToArgvW(string commandLine, out int count);
+
+    [DllImport("kernel32.dll")]
+    static extern IntPtr LocalFree(IntPtr memory);
+
+    // Splits a command line exactly like the started program receives its arguments.
+    public static string[] SplitArguments(string commandLine)
+    {
+        int count;
+        IntPtr argv = CommandLineToArgvW(commandLine, out count);
+        if (argv == IntPtr.Zero) return new string[0];
+        try
+        {
+            string[] result = new string[count];
+            for (int i = 0; i < count; i++)
+                result[i] = Marshal.PtrToStringUni(Marshal.ReadIntPtr(argv, i * IntPtr.Size));
+            return result;
+        }
+        finally
+        {
+            LocalFree(argv);
+        }
+    }
 }
 '@
 }
@@ -177,31 +205,120 @@ function ConvertTo-CommandLineArgument {
 }
 
 function Get-ShortcutArguments {
-    # Command line of the shortcuts: conhost --headless powershell.exe ... -File ClipboardManager.ps1 <settings>
-    # $PSBoundParameters (a Dictionary) or a hashtable. ContainsKey, not Contains: the Dictionary
-    # implements IDictionary.Contains only explicitly, so PowerShell cannot call it.
-    param([System.Collections.IDictionary]$Settings)
-
+    # Command line of the shortcuts: conhost --headless powershell.exe ... -File ClipboardManager.ps1 - no settings:
+    # psclip reads them from settings.ini (given on the command line, they would win over its tray menu).
     $arguments = @('--headless', $powershellExe, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $managerScript)
-    foreach ($name in 'Hotkey', 'MaxMemory', 'Theme', 'Size', 'OpenAt', 'KeepAwakeSeconds') {
-        if ($Settings.ContainsKey($name)) { $arguments += "-$name", [string]$Settings[$name] }
-    }
-    foreach ($name in 'Preview', 'KeepAwake', 'KeepPinned') {
-        if ($Settings.ContainsKey($name) -and [bool]$Settings[$name]) { $arguments += "-$name" }
-    }
-
     ($arguments | ForEach-Object { ConvertTo-CommandLineArgument $_ }) -join ' '
 }
 
-function Get-InstallSettings {
-    # The settings for the shortcuts: $InstallDefaults, overridden by what was given ($PSBoundParameters) -
-    # also -KeepPinned:$false.
+function Get-GivenSettings {
+    # The settings given to Install.ps1 ($PSBoundParameters): its parameters except its own and the common ones.
     param([System.Collections.IDictionary]$Bound)
 
+    $given = @{}
+    foreach ($name in $Bound.Keys) {
+        $own = @('Autostart', 'Force', 'Uninstall') -contains $name
+        if ($own -or [System.Management.Automation.PSCmdlet]::CommonParameters.Contains($name)) { continue }
+        $given[$name] = $Bound[$name]
+    }
+    $given
+}
+
+function Get-InstallSettings {
+    # The settings of a new settings.ini: psclip's defaults; over them the installer's ($InstallDefaults) - or, when
+    # an older shortcut passed settings, those instead (the user's choice, also a switch it left out); over all
+    # that, the given ones (also -KeepPinned:$false).
+    param(
+        [System.Collections.IDictionary]$Defaults,
+        [System.Collections.IDictionary]$Shortcut,
+        [System.Collections.IDictionary]$Given
+    )
+
+    $base = if ($null -ne $Shortcut) { $Shortcut } else { $InstallDefaults }
     $settings = @{}
-    foreach ($name in $InstallDefaults.Keys) { $settings[$name] = $InstallDefaults[$name] }
-    foreach ($name in $Bound.Keys) { $settings[$name] = $Bound[$name] }
+    foreach ($source in $Defaults, $base, $Given) {
+        foreach ($name in $source.Keys) { $settings[$name] = $source[$name] }
+    }
     $settings
+}
+
+function Read-ShortcutArguments {
+    # The arguments of an existing shortcut, or $null.
+    param([string]$Path)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $shell.CreateShortcut($Path).Arguments
+    }
+    finally {
+        [void][Runtime.InteropServices.Marshal]::ReleaseComObject($shell)
+    }
+}
+
+function ConvertFrom-ShortcutArguments {
+    # The settings a shortcut of an older Install.ps1 passes after "-File ClipboardManager.ps1" (a switch: $true),
+    # or $null when it passes none.
+    param([string]$Arguments, [string[]]$Names, [string[]]$Switches)
+
+    if (-not $Arguments) { return $null }
+    $tokens = [InstallNative]::SplitArguments("conhost.exe $Arguments")
+    $file = [array]::IndexOf($tokens, '-File')
+    if ($file -lt 0) { return $null }
+    $settings = @{}
+    for ($i = $file + 2; $i -lt $tokens.Count; $i++) {
+        if (-not $tokens[$i].StartsWith('-')) { continue }
+        $name = @($Names) -eq $tokens[$i].Substring(1)   # -eq ignores case
+        if ($name.Count -eq 0) { continue }   # e.g. -MaxItems of even older versions
+        if (@($Switches) -contains $name[0]) {
+            $settings[$name[0]] = $true
+        }
+        elseif ($i + 1 -lt $tokens.Count) {
+            $i++
+            $settings[$name[0]] = $tokens[$i]
+        }
+    }
+    if ($settings.Count -eq 0) { return $null }
+    $settings
+}
+
+function Write-InstallSettings {
+    # settings.ini for psclip started by the shortcuts; returns the settings now in it. A new file gets every
+    # setting (Get-InstallSettings). An existing one keeps the user's settings - from the tray menu or an editor -
+    # and its comments; only the given settings change.
+    param([string]$Path, [System.Collections.IDictionary]$Given, [string]$ShortcutArguments)
+
+    . $managerScript   # its settings functions; inside this function, its variables stay out of Install.ps1
+    $values = @{}
+    foreach ($name in $Given.Keys) {
+        $values[$name] = ConvertFrom-SettingText $name (ConvertTo-SettingText $Given[$name])
+    }
+    if (Test-Path -LiteralPath $Path -PathType Leaf) {
+        $lines = @(Read-SettingsLines $Path)
+        foreach ($name in $values.Keys) {
+            $lines = @(Set-SettingLine $lines $name (ConvertTo-SettingText $values[$name]))
+        }
+        if ($values.Count -gt 0) { Write-SettingsLines $Path $lines }
+    }
+    else {
+        $switches = @($SettingDefinitions.Keys | Where-Object { $SettingDefinitions[$_].Type -eq 'Switch' })
+        $shortcut = ConvertFrom-ShortcutArguments -Arguments $ShortcutArguments -Names @($SettingDefinitions.Keys) `
+            -Switches $switches
+        $defaults = Get-ParameterSettings   # ClipboardManager.ps1's defaults, from the dot-sourcing above
+        $settings = Get-InstallSettings -Defaults $defaults -Shortcut $shortcut -Given $values
+        foreach ($name in @($settings.Keys)) {
+            try {
+                $settings[$name] = ConvertFrom-SettingText $name (ConvertTo-SettingText $settings[$name])
+            }
+            catch {
+                # Only a value from the old shortcut can be invalid - and psclip did not start with it either.
+                Write-Warning "Not taken over from the old shortcut: $($_.Exception.Message)"
+                $settings[$name] = ConvertFrom-SettingText $name (ConvertTo-SettingText $defaults[$name])
+            }
+        }
+        Write-SettingsLines $Path (New-SettingsLines $settings)
+    }
+    (Read-SettingsFile $Path).Values
 }
 
 function Assert-Hotkey {
@@ -268,13 +385,13 @@ function New-Shortcut {
 }
 
 function Get-UnloadedPinnedWarning {
-    # Saved pinned entries that psclip started by the new shortcuts would not load (no -KeepPinned).
+    # Saved pinned entries that psclip would not load at its start (KeepPinned = false in settings.ini).
     param([string]$Folder, [bool]$KeepPinned)
 
     $file = Join-Path $Folder 'pinned.dat'
     if ($KeepPinned -or -not (Test-Path -LiteralPath $file)) { return }
-    'pinned.dat holds saved pinned entries, but with -KeepPinned:$false psclip does not load them at start ' +
-        "(only when 'Keep pinned entries' is switched on in its tray menu). Leave it out to keep them."
+    'pinned.dat holds saved pinned entries, but with KeepPinned = false (settings.ini) psclip does not load them ' +
+        "at start - only when 'Keep pinned entries' is switched on in its tray menu. -KeepPinned switches it on."
 }
 
 function Confirm-Restart {
@@ -305,10 +422,11 @@ if ($Uninstall) {
             Write-Host "Removed $path"
         }
     }
-    $pinnedFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'pinned*.dat*' -File)
-    if ($pinnedFiles.Count -gt 0) {
-        Write-Host ('Pinned entries saved by "Keep pinned entries" are still in this folder (' +
-            (($pinnedFiles | ForEach-Object { $_.Name }) -join ', ') + '); they go with it when you delete it.')
+    $ownFiles = @(Get-ChildItem -LiteralPath $PSScriptRoot -File |
+        Where-Object { $_.Name -like 'pinned*.dat*' -or $_.Name -like 'settings*.ini' })
+    if ($ownFiles.Count -gt 0) {
+        Write-Host ("psclip's settings and saved pinned entries are still in this folder (" +
+            (($ownFiles | ForEach-Object { $_.Name }) -join ', ') + '); they go with it when you delete it.')
     }
     return
 }
@@ -328,8 +446,14 @@ if (-not (Test-Path -LiteralPath $partsFolder)) {
 Unblock-File -LiteralPath (@($managerScript) + @(Get-ChildItem -LiteralPath $partsFolder -File).FullName)
 if ($PSBoundParameters.ContainsKey('Hotkey')) { Assert-Hotkey $Hotkey }
 
-$settings = Get-InstallSettings $PSBoundParameters
-$shortcutArguments = Get-ShortcutArguments $settings
+# Before the shortcuts are replaced: settings that an older version's shortcut passed move into a new settings.ini.
+$oldArguments = Read-ShortcutArguments $startMenuShortcut
+if ($null -eq $oldArguments) { $oldArguments = Read-ShortcutArguments $autostartShortcut }
+$settings = Write-InstallSettings -Path $settingsFile -Given (Get-GivenSettings $PSBoundParameters) `
+    -ShortcutArguments $oldArguments
+Write-Host "Settings: $settingsFile (psclip's tray menu changes them too)"
+
+$shortcutArguments = Get-ShortcutArguments
 New-Shortcut -Path $startMenuShortcut -Arguments $shortcutArguments
 Write-Host "Start menu shortcut: $startMenuShortcut"
 
@@ -347,8 +471,8 @@ if ($pinnedWarning) { Write-Warning $pinnedWarning }
 
 $runningId = Get-ManagerProcessId
 if ($runningId -ne 0) {
-    $question = 'psclip is running. Restart it now so that the new settings apply? Its history will be ' +
-        "lost - and its pinned entries too, unless 'Keep pinned entries' is on in its tray menu."
+    $question = 'psclip is running. Restart it now so that this version and its settings apply? Its history ' +
+        "will be lost - and its pinned entries too, unless 'Keep pinned entries' is on in its tray menu."
     if (-not (Confirm-Restart -Question $question -Force:$Force)) {
         Write-Host 'psclip keeps running with its current settings; the new ones apply the next time it starts.'
         return

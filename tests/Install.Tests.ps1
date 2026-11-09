@@ -59,57 +59,12 @@ Describe 'ConvertTo-CommandLineArgument' {
 }
 
 Describe 'Get-ShortcutArguments' {
-    It 'starts Windows PowerShell 5.1 headless with the manager script' {
-        $parsed = [ArgvParser]::Split('conhost.exe ' + (Get-ShortcutArguments @{}))
+    It 'starts Windows PowerShell 5.1 headless with the manager script - and no settings (settings.ini has them)' {
+        $parsed = [ArgvParser]::Split('conhost.exe ' + (Get-ShortcutArguments))
         $parsed[1] | Should BeExactly '--headless'
         $parsed[2] | Should Match 'WindowsPowerShell\\v1\.0\\powershell\.exe$'
         $parsed[-2] | Should BeExactly '-File'
         $parsed[-1] | Should BeExactly $managerScript
-    }
-
-    It 'passes the settings on unchanged, also a hotkey ending in a backslash' {
-        $line = Get-ShortcutArguments @{
-            Hotkey = 'Ctrl+\'; Theme = 'Light'; MaxMemory = '500MB'; OpenAt = 'TextCursor'
-            Preview = [switch]$true; KeepAwake = [switch]$true; KeepPinned = [switch]$true
-        }
-        $parsed = [ArgvParser]::Split('conhost.exe ' + $line)
-        $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
-        $afterFile -join ' ' | Should BeExactly ('-Hotkey Ctrl+\ -MaxMemory 500MB -Theme Light -OpenAt TextCursor ' +
-            '-Preview -KeepAwake -KeepPinned')
-    }
-
-    It "passes on every setting of Install.ps1 that psclip has - and none of the installer's own" {
-        # An unknown parameter would stop psclip at logon without any message (headless). So the test takes the
-        # parameters from Install.ps1 itself and binds all of them, like a user who passes everything.
-        $installer = (Get-Command (Join-Path $PSScriptRoot '..\Install.ps1')).Parameters
-        $manager = (Get-Command $managerScript).Parameters
-        $common = [System.Management.Automation.PSCmdlet]::CommonParameters
-        $bound = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-        foreach ($parameter in $installer.Values) {
-            $choices = @($parameter.Attributes | Where-Object { $_ -is [ValidateSet] } |
-                ForEach-Object { $_.ValidValues })
-            $bound[$parameter.Name] = if ($parameter.SwitchParameter) { [switch]$true }
-                elseif ($parameter.ParameterType -eq [int]) { 10 }
-                elseif ($choices.Count -gt 0) { $choices[-1] }
-                else { 'Ctrl+Alt+F12' }   # the hotkey
-        }
-        $line = Get-ShortcutArguments (Get-InstallSettings $bound)
-        $parsed = [ArgvParser]::Split('conhost.exe ' + $line)
-        $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
-        $passed = @($afterFile | Where-Object { $_.StartsWith('-') } | ForEach-Object { $_.Substring(1) })
-
-        @($passed | Where-Object { -not $manager.ContainsKey($_) }) -join ', ' | Should BeExactly ''
-        $expected = @($installer.Keys | Where-Object { $manager.ContainsKey($_) -and $common -notcontains $_ })
-        @($expected | Where-Object { $passed -notcontains $_ }) -join ', ' | Should BeExactly ''
-    }
-
-    It 'accepts the parameter dictionary of Install.ps1 ($PSBoundParameters), not just hashtables' {
-        $bound = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-        $bound['KeepAwake'] = [switch]$true
-        $bound['Size'] = 'L'
-        $parsed = [ArgvParser]::Split('conhost.exe ' + (Get-ShortcutArguments $bound))
-        $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
-        $afterFile -join ' ' | Should BeExactly '-Size L -KeepAwake'
     }
 
     It 'keeps working with shortcuts of older versions (-MaxItems, -MaxImages)' {
@@ -118,30 +73,135 @@ Describe 'Get-ShortcutArguments' {
         $parameters.ContainsKey('MaxItems') | Should Be $true
         $parameters.ContainsKey('MaxImages') | Should Be $true
     }
+}
 
-    It 'leaves out settings that were not given' {
-        Get-ShortcutArguments @{ Size = 'L' } | Should Not Match '-Theme|-Hotkey|-KeepAwake'
+Describe 'Get-GivenSettings' {
+    It "takes the settings from Install.ps1's parameters, not its own ones or the common ones" {
+        $bound = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+        $bound['Autostart'] = [switch]$true
+        $bound['Force'] = [switch]$true
+        $bound['Verbose'] = [switch]$true
+        $bound['Size'] = 'L'
+        $bound['KeepPinned'] = [switch]$false
+        $given = Get-GivenSettings $bound
+        @($given.Keys | Sort-Object) -join ' ' | Should BeExactly 'KeepPinned Size'
+        $given.Size | Should BeExactly 'L'
+    }
+
+    It "has a setting in psclip's settings file - and a parameter of psclip - for each of Install.ps1's settings" {
+        . $managerScript
+        $installer = (Get-Command (Join-Path $PSScriptRoot '..\Install.ps1')).Parameters
+        $psclip = (Get-Command $managerScript).Parameters
+        $own = 'Autostart', 'Force', 'Uninstall'
+        $common = [System.Management.Automation.PSCmdlet]::CommonParameters
+        $settings = @($installer.Keys | Where-Object { $own -notcontains $_ -and -not $common.Contains($_) })
+        $settings.Count | Should BeGreaterThan 5
+        @($settings | Where-Object { -not $SettingDefinitions.Contains($_) }) -join ', ' | Should BeExactly ''
+        @($SettingDefinitions.Keys | Where-Object { -not $psclip.ContainsKey($_) }) -join ', ' | Should BeExactly ''
     }
 }
 
 Describe 'Get-InstallSettings' {
-    function Get-ArgumentsAfterFile {
-        param([System.Collections.IDictionary]$Bound)
-        $parsed = [ArgvParser]::Split('conhost.exe ' + (Get-ShortcutArguments (Get-InstallSettings $Bound)))
-        $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)] -join ' '
-    }
+    $defaults = @{ MaxMemory = '100MB'; OpenAt = 'Mouse'; KeepPinned = $false; Theme = 'Dark'; Size = 'M' }
 
-    It 'starts psclip with 500 MB, at the text cursor and keeping pinned entries when nothing is given' {
-        Get-ArgumentsAfterFile @{} | Should BeExactly '-MaxMemory 500MB -OpenAt TextCursor -KeepPinned'
+    It 'gives a new installation 500 MB, the popup at the text cursor and keeping pinned entries' {
+        $settings = Get-InstallSettings -Defaults $defaults -Shortcut $null -Given @{}
+        $settings.MaxMemory | Should BeExactly '500MB'
+        $settings.OpenAt | Should BeExactly 'TextCursor'
+        $settings.KeepPinned | Should Be $true
+        $settings.Theme | Should BeExactly 'Dark'
     }
 
     It 'lets every given setting win, also -KeepPinned:$false' {
-        $bound = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
-        $bound['MaxMemory'] = '1GB'
-        $bound['OpenAt'] = 'Mouse'
-        $bound['KeepPinned'] = [switch]$false
-        $bound['Size'] = 'L'
-        Get-ArgumentsAfterFile $bound | Should BeExactly '-MaxMemory 1GB -Size L -OpenAt Mouse'
+        $given = @{ MaxMemory = '1GB'; OpenAt = 'Mouse'; KeepPinned = $false; Size = 'L' }
+        $settings = Get-InstallSettings -Defaults $defaults -Shortcut $null -Given $given
+        $settings.MaxMemory | Should BeExactly '1GB'
+        $settings.OpenAt | Should BeExactly 'Mouse'
+        $settings.KeepPinned | Should Be $false
+        $settings.Size | Should BeExactly 'L'
+    }
+
+    It "takes an older shortcut's settings instead of the installer's defaults - a switch it left out is off" {
+        $shortcut = @{ Theme = 'Light'; OpenAt = 'TextCursor' }   # installed with -KeepPinned:$false
+        $settings = Get-InstallSettings -Defaults $defaults -Shortcut $shortcut -Given @{ Size = 'S' }
+        $settings.Theme | Should BeExactly 'Light'
+        $settings.MaxMemory | Should BeExactly '100MB'
+        $settings.KeepPinned | Should Be $false
+        $settings.Size | Should BeExactly 'S'
+    }
+}
+
+Describe 'ConvertFrom-ShortcutArguments' {
+    $names = 'Hotkey', 'Theme', 'Size', 'OpenAt', 'MaxMemory', 'KeepPinned', 'Preview', 'KeepAwake', 'KeepAwakeSeconds'
+    $switches = 'KeepPinned', 'Preview', 'KeepAwake'
+
+    It 'reads the settings an older Install.ps1 put into the shortcut' {
+        $arguments = '--headless C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile ' +
+            '-ExecutionPolicy Bypass -File "C:\My Tools\psclip\ClipboardManager.ps1" -Hotkey Ctrl+\ -MaxMemory 1GB ' +
+            '-OpenAt TextCursor ' +
+            '-KeepAwake -KeepPinned -MaxItems 50'
+        $settings = ConvertFrom-ShortcutArguments $arguments $names $switches
+        @($settings.Keys | Sort-Object) -join ' ' | Should BeExactly 'Hotkey KeepAwake KeepPinned MaxMemory OpenAt'
+        $settings.Hotkey | Should BeExactly 'Ctrl+\'
+        $settings.MaxMemory | Should BeExactly '1GB'
+        $settings.KeepAwake | Should Be $true
+    }
+
+    It 'returns nothing for a shortcut without settings, or none at all' {
+        ConvertFrom-ShortcutArguments (Get-ShortcutArguments) $names $switches | Should BeNullOrEmpty
+        ConvertFrom-ShortcutArguments $null $names $switches | Should BeNullOrEmpty
+    }
+}
+
+Describe 'Write-InstallSettings' {
+    $path = Join-Path $TestDrive 'settings.ini'
+    . $managerScript   # Read-SettingsFile
+    $oldShortcut = '--headless powershell.exe -File "C:\psclip\ClipboardManager.ps1" -Theme Light -KeepAwake'
+
+    It 'writes a new file with every setting: the installer defaults and the given ones' {
+        $values = Write-InstallSettings -Path $path -Given @{ Size = 'L'; KeepAwake = [switch]$true }
+        $values.Count | Should Be $SettingDefinitions.Count
+        $values.MaxMemory | Should BeExactly '500MB'
+        $values.OpenAt | Should BeExactly 'TextCursor'
+        $values.KeepPinned | Should Be $true
+        $values.Size | Should BeExactly 'L'
+        $values.KeepAwake | Should Be $true
+        $values.Theme | Should BeExactly 'Dark'
+        $values.Hotkey | Should BeExactly 'Ctrl+Oemtilde'
+        (Read-SettingsFile $path).Problems.Count | Should Be 0
+        [IO.File]::ReadAllText($path) | Should Match "(?m)^# Keep pinned entries"
+    }
+
+    It 'changes only the given settings of an existing file - its other lines and comments stay' {
+        [IO.File]::WriteAllText($path, "# mine`r`nTheme = Light`r`nSize = S`r`n")
+        $values = Write-InstallSettings -Path $path -Given @{ Size = 'M'; Hotkey = 'ctrl+alt+f12' } `
+            -ShortcutArguments $oldShortcut
+        $expected = "# mine`r`nTheme = Light`r`nSize = M`r`nHotkey = Ctrl+Alt+F12`r`n"
+        [IO.File]::ReadAllText($path) | Should BeExactly $expected
+        $values.Theme | Should BeExactly 'Light'
+    }
+
+    It 'leaves an existing file as it is when no setting is given' {
+        [IO.File]::WriteAllText($path, "Theme = Light`n")
+        $null = Write-InstallSettings -Path $path -Given @{}
+        [IO.File]::ReadAllText($path) | Should BeExactly "Theme = Light`n"
+    }
+
+    It "moves an older shortcut's settings into a new file" {
+        Remove-Item -LiteralPath $path
+        $values = Write-InstallSettings -Path $path -Given @{} -ShortcutArguments $oldShortcut
+        $values.Theme | Should BeExactly 'Light'
+        $values.KeepAwake | Should Be $true
+        $values.KeepPinned | Should Be $false   # the old shortcut did not pass -KeepPinned
+        $values.MaxMemory | Should BeExactly '100MB'
+    }
+
+    It "skips an old shortcut's setting that is not valid" {
+        Remove-Item -LiteralPath $path
+        $values = Write-InstallSettings -Path $path -Given @{} 3>$null `
+            -ShortcutArguments '--headless powershell.exe -File C:\psclip\ClipboardManager.ps1 -Size XXL -Theme Light'
+        $values.Size | Should BeExactly 'M'
+        $values.Theme | Should BeExactly 'Light'
     }
 }
 

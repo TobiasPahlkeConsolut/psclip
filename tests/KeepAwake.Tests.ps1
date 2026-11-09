@@ -17,7 +17,7 @@ Describe 'Keep awake' {
     }
 
     It 'follows the KeepAwakeSeconds parameter' {
-        $script:KeepAwakeSeconds = 2
+        $State.KeepAwakeSeconds = 2
         Test-KeepAwakeDue 1999 | Should Be $false
         Test-KeepAwakeDue 2000 | Should Be $true
     }

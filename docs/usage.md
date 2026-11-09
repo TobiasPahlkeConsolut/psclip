@@ -67,10 +67,12 @@ The tray icon is a small blue clipboard, possibly in the `^` overflow area of th
   - *Keep pinned entries* - on / off: save the pinned entries for the next start (see
     [Keeping pinned entries](#keeping-pinned-entries))
   - *Keep awake* - on / off (off by default)
+  - *Edit settings file...* - opens `settings.ini` (see [Settings file](options.md#settings-file))
   - *Exit*
 
-Settings changed in the tray menu last until psclip exits (nothing is saved). To keep them, pass them to
-`Install.ps1` (see [Options](options.md)).
+psclip installed with `Install.ps1` saves the settings changed in the tray menu to `settings.ini`, so they are kept.
+Without that file (`ClipboardManager.ps1` started by itself), they last until psclip exits - *Edit settings file...*
+creates it.
 
 <br clear="right">
 
@@ -85,7 +87,8 @@ windows). Windows then never sees the session as idle. While you are working, no
 
 With *Keep pinned entries* on, pinned entries survive restarts; otherwise they are gone when psclip exits, like the
 rest of the history. `Install.ps1` switches it on (`-KeepPinned`) unless you pass `-KeepPinned:$false`;
-`ClipboardManager.ps1` started by itself has it off. The tray menu switches it, until psclip exits.
+`ClipboardManager.ps1` started by itself has it off. The tray menu switches it (kept in `settings.ini`, if there is
+one).
 
 - The pinned entries are saved to **`pinned.dat` next to `ClipboardManager.ps1`** - texts with their formatting,
   images as PNG - every time they change (pin, unpin, remove, copying a pinned text again), and loaded at the next

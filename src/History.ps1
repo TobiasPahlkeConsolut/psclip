@@ -46,10 +46,10 @@ function Read-ClipboardEntry {
         }
         return $image
     }
-    if ($text.Length -gt $MaxEntryLength) {
+    if ($text.Length -gt $State.MaxEntryLength) {
         # Before asking for the formatting: the source app renders it only on request, which can take
         # long (e.g. a large Excel range) - wasted for a text that is not recorded.
-        Write-Verbose "Skipped entry with $($text.Length) chars (MaxEntryLength $MaxEntryLength)."
+        Write-Verbose "Skipped entry with $($text.Length) chars (MaxEntryLength $($State.MaxEntryLength))."
         return $null
     }
 
@@ -60,7 +60,7 @@ function Read-ClipboardEntry {
         $formatName = [DataFormats]::$format
         if (-not $Data.GetDataPresent($formatName, $false)) { continue }
         $value = $Data.GetData($formatName, $false) -as [string]
-        if ($value -and $value.Length -le $MaxEntryLength) { $entry.$format = $value }
+        if ($value -and $value.Length -le $State.MaxEntryLength) { $entry.$format = $value }
     }
     $entry
 }
@@ -162,8 +162,8 @@ function Add-ClipboardEntry {
     if ($null -eq $Entry) { return }
     if (-not $Entry.IsImage) {
         if ([string]::IsNullOrWhiteSpace($Entry.Text)) { return }
-        if ($Entry.Text.Length -gt $MaxEntryLength) {
-            Write-Verbose "Skipped entry with $($Entry.Text.Length) chars (MaxEntryLength $MaxEntryLength)."
+        if ($Entry.Text.Length -gt $State.MaxEntryLength) {
+            Write-Verbose "Skipped entry with $($Entry.Text.Length) chars (MaxEntryLength $($State.MaxEntryLength))."
             return
         }
     }

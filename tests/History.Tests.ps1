@@ -39,7 +39,7 @@ Describe 'Read-ClipboardEntry' {
     }
 
     It 'drops formatting larger than MaxEntryLength but keeps the text' {
-        $script:MaxEntryLength = 100
+        $State.MaxEntryLength = 100
         $data = New-Data 'text'
         $data.SetData([System.Windows.Forms.DataFormats]::Rtf, '{\rtf1 ' + ('x' * 200) + '}')
         $entry = Read-ClipboardEntry $data
@@ -84,7 +84,7 @@ Describe 'Read-ClipboardEntry' {
     }
 
     It 'skips too long text without reading its formatting' {
-        $script:MaxEntryLength = 10
+        $State.MaxEntryLength = 10
         $data = [PsClipTest.RecordingDataObject]::new()
         $data.SetText('x' * 11)
         $data.SetData([System.Windows.Forms.DataFormats]::Html, '<b>x</b>')
@@ -390,7 +390,7 @@ Describe 'Clipboard history' {
     }
 
     It 'skips texts longer than MaxEntryLength' {
-        $script:MaxEntryLength = 10
+        $State.MaxEntryLength = 10
         Add-Entries ('x' * 11), 'short'
         $State.History -join '|' | Should BeExactly 'short'
     }

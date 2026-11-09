@@ -33,64 +33,20 @@ namespace PsClip
                 return;
             }
             byte[] data = ProtectedData.Protect(Serialize(entries), Entropy, DataProtectionScope.CurrentUser);
-            // Written next to the file first, then swapped in: a crash or power cut while writing leaves the
-            // previous version, never half a file. Flushed to the disk before the swap - otherwise the swap
-            // could be on the disk after a power cut while the new content is not.
-            string temp = path + ".tmp";
-            RetryWhileInUse(delegate
-            {
-                using (FileStream stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None,
-                    4096, FileOptions.WriteThrough))
-                {
-                    stream.Write(data, 0, data.Length);
-                    stream.Flush(true);
-                }
-                if (File.Exists(path))
-                {
-                    File.Replace(temp, path, null);
-                }
-                else
-                {
-                    File.Move(temp, path);
-                }
-            });
+            SafeFile.Write(path, data);   // never half a file; retried while a virus scanner holds it
         }
 
         // Deleting and renaming the file (switching "Keep pinned entries" off, setting an unreadable file aside) -
         // with the same patience as saving.
         public static void Delete(string path)
         {
-            RetryWhileInUse(delegate { File.Delete(path); });   // no error when there is no file
+            SafeFile.Delete(path);   // no error when there is no file
         }
 
         public static void Rename(string path, string newPath)
         {
-            RetryWhileInUse(delegate { File.Move(path, newPath); });
+            SafeFile.Move(path, newPath);
         }
-
-        // A virus scanner or backup program may hold the file for a moment - typically right after it was written,
-        // so the next save fails now and then. Such a sharing violation is tried again a few times (at most about
-        // 0.4 s) before it counts; any other error counts at once.
-        static void RetryWhileInUse(Action action)
-        {
-            for (int attempt = 1; ; attempt++)
-            {
-                try
-                {
-                    action();
-                    return;
-                }
-                catch (IOException e)
-                {
-                    int code = e.HResult & 0xFFFF;
-                    bool inUse = code == 32 || code == 33;   // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
-                    if (!inUse || attempt >= InUseAttempts) throw;
-                }
-                System.Threading.Thread.Sleep(40 * attempt);
-            }
-        }
-
-        const int InUseAttempts = 5;
 
         // The saved entries, or none when there is no file. Throws
         // - an IOException or UnauthorizedAccessException when the file cannot be opened - maybe only for the
@@ -101,8 +57,7 @@ namespace PsClip
         public static List<ClipEntry> Load(string path, int thumbnailHeight)
         {
             if (!File.Exists(path)) return new List<ClipEntry>();
-            byte[] data = null;
-            RetryWhileInUse(delegate { data = File.ReadAllBytes(path); });
+            byte[] data = SafeFile.Read(path);
             byte[] plain;
             try
             {

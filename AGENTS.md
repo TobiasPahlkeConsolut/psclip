@@ -19,8 +19,9 @@ features, quick install, key table, links.
 | `src/Ocr.ps1`                     | Text in images (Windows.Media.Ocr), in the background                |
 | `src/KeepAwake.ps1`               | Keep awake (unrelated to the clipboard)                              |
 | `src/Window.ps1`                  | Building the popup window, the menus and the tray icon               |
-| `src/*.cs`                        | C# helpers, compiled together with `Add-Type`: `Native` (Win32 calls), `ClipboardHost` (hidden window), `ClipEntry`, `MenuRenderer`, `Caret` (text cursor of another program), `PinnedStore` (the `-KeepPinned` file), `ListPainter` (row text, highlights) |
-| `Install.ps1`                     | Creates/removes Start menu and autostart shortcuts                   |
+| `src/Settings.ps1`                | The settings file `settings.ini`: reading, saving, applying changes (also used by `Install.ps1`) |
+| `src/*.cs`                        | C# helpers, compiled together with `Add-Type`: `Native` (Win32 calls), `ClipboardHost` (hidden window), `ClipEntry`, `MenuRenderer`, `Caret` (text cursor of another program), `PinnedStore` (the `-KeepPinned` file), `SafeFile` (writing psclip's files safely), `ListPainter` (row text, highlights) |
+| `Install.ps1`                     | Creates/removes Start menu and autostart shortcuts, writes `settings.ini` |
 | `tests/<Part>.Tests.ps1`          | Unit tests per part file (Pester 3.4 syntax)                         |
 | `tests/UnitTestSupport.ps1`       | Shared unit-test setup: loads the app, `Reset-TestState`, helpers    |
 | `tests/Style.Tests.ps1`           | Formatting rules for all `.ps1`/`.cs` files (see Style)              |
@@ -41,11 +42,11 @@ features, quick install, key table, links.
 
 ## Hard constraints
 
-- **Nothing is persisted** - with one opt-in exception the owner asked for: `-KeepPinned` saves the pinned entries,
-  encrypted (see Architecture). The history and runtime settings live in memory only. Do not add files, registry
-  values or any other storage without the owner asking for it - it is the defining feature. Settings changed in the
-  tray menu (hotkey, dark mode, window size, keep pinned entries, keep awake, ...) therefore last until exit; permanent
-  settings are script parameters, passed on by `Install.ps1`.
+- **The history is never persisted** - it is the defining feature. Two opt-in exceptions the owner asked for:
+  `-KeepPinned` saves the pinned entries, encrypted, and the settings file `settings.ini` keeps the settings (see
+  Architecture) - only when it exists (`Install.ps1` and the tray menu's *Edit settings file...* create it); without
+  it, tray menu changes last until exit and nothing is written. Do not add files, registry values or any other
+  storage without the owner asking for it.
 - **MIT License** (`LICENSE`) - keep the "License" section at the end of the README.
 - **Windows PowerShell 5.1 only**, no PowerShell 7 syntax: no `? :`, `??`, `?.`, `&&`, `||`, `-Parallel`.
   `[Type]::new()` and `using namespace` are fine (5.0+).
@@ -121,6 +122,22 @@ features, quick install, key table, links.
   `pinned.dat.unreadable-<date>`, and stays off for one that cannot be opened. Tray messages are cut at 255
   characters (`Show-TrayWarning`), so keep them short and put no paths in them. If the format ever changes, keep
   reading the old `FormatVersion` - otherwise users lose their pinned entries.
+- The settings file (`src/Settings.ps1`): `settings.ini` next to the script (`settings-<InstanceName>.ini` for other
+  instances), one `Name = value` per line, `#`/`;` comments. Every setting is a parameter of the same name and values
+  (`$SettingDefinitions`: type, choices/range, the comment written above it in a new file; `Settings.Tests.ps1`
+  compares them with the `param()` attributes). At startup `Get-StartSettings` takes the command line
+  (`$PSBoundParameters`) over the file over the defaults; `$State` then holds every setting (also `KeepAwakeSeconds`
+  and `MaxEntryLength`). Values are kept in the file's form (`ConvertFrom-SettingText`: canonical case, `$true`/
+  `$false`, ints, the hotkey as `[Keys]` names via `Format-HotkeySetting` - never the layout-dependent
+  `HotkeyText`). The tray menu calls `Save-Setting <Name>` after a change: only if the file exists, it rewrites just
+  that setting's line(s) (`Set-SettingLine`), so the user's comments and order stay. A `FileSystemWatcher`
+  (`SynchronizingObject` = the popup form, so its events run on the UI thread) restarts a 300 ms timer; then
+  `Receive-SettingsFileChange` applies (`Set-Setting`, the same functions as the tray menu) only the settings whose
+  value differs from `$State.SettingsInFile` - the values last read or written - so psclip's own saves and settings
+  given on the command line stay untouched until the user changes them in the file. Removed lines keep the current
+  value; invalid lines are reported once (`Show-SettingsProblems`). `PsClip.SafeFile` writes it (and `pinned.dat`) via
+  a temporary file and `File.Replace`, retrying sharing violations - `File.Replace` leaves a moment without the file,
+  so readers must retry rather than take "missing" for "deleted".
 - Clipboard notifications are read `$ClipboardReadDelay` (100 ms) after the first one (`Request-ClipboardRead`, a
   timer that further notifications do not restart, so constant changes cannot postpone it); `Show-Popup` reads a
   pending change first, so a copy just before the hotkey is listed. Reading at once collided with other readers
@@ -276,10 +293,14 @@ features, quick install, key table, links.
 
 ## Installer defaults
 
-`Install.ps1` starts psclip with three defaults of its own (`$InstallDefaults`: `-MaxMemory 500MB`,
-`-OpenAt TextCursor`, `-KeepPinned`), merged with the given parameters by `Get-InstallSettings` before
-`Get-ShortcutArguments` builds the command line; `-KeepPinned:$false` turns that one off. `ClipboardManager.ps1`'s own
-defaults stay minimal (100 MB, mouse pointer, nothing saved). Keep `docs/options.md` and both help texts in sync.
+`Install.ps1` writes the settings to `settings.ini` (`Write-InstallSettings`, which dot-sources the app inside the
+function for `src/Settings.ps1`); the shortcuts pass no settings - on the command line they would win over the tray
+menu at every start. A new file gets psclip's defaults, over them three of the installer's own (`$InstallDefaults`:
+`MaxMemory = 500MB`, `OpenAt = TextCursor`, `KeepPinned = true`) - or, when updating, the settings an older version's
+shortcut passed (`ConvertFrom-ShortcutArguments`; read before the shortcut is replaced) - and over all that the given
+parameters (`Get-InstallSettings`; `-KeepPinned:$false` turns that one off). An existing file keeps everything but the
+given settings. `ClipboardManager.ps1`'s own defaults stay minimal (100 MB, mouse pointer, nothing saved). Keep
+`docs/options.md` and both help texts in sync.
 
 ## Releases
 

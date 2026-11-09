@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Settings file**: `settings.ini` next to psclip keeps the settings - easy to read and to edit with any text editor
+  (*Edit settings file...* in the tray menu). The tray menu saves its changes to it, and changes saved in the file
+  apply at once, without a restart. The history itself is still never written to disk
+- `Install.ps1` writes the settings to `settings.ini` instead of into the shortcuts. Updating from an older version, it
+  moves the settings from the old shortcut into the file; an existing file keeps its settings, except those you give
+  `Install.ps1`
+
 ## 1.1.2 - 2026-11-09
 
 - At the text cursor, the popup no longer covers the line you are typing in when it fits neither below nor above it

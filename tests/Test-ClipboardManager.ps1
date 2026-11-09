@@ -6,7 +6,9 @@
     Starts the clipboard manager in a background process and drives it with window messages
     and real keystrokes: clipboard capture, de-duplication, private content, popup, filter,
     pinning, pasting into another window, preview, popup size, the tray menu (window size, memory
-    limit, open at, hotkey dialog, dark mode, keep pinned entries, keep awake) and graceful shutdown.
+    limit, open at, hotkey dialog, dark mode, keep pinned entries, keep awake), the settings file
+    (read at start, saved by the tray menu, applied when saved, kept across a restart) and graceful
+    shutdown.
 
     The test briefly opens windows and sends key presses - do not type, click or move the mouse
     while it runs (about a minute). Real keystrokes are only sent after checking that the expected
@@ -72,16 +74,36 @@ $managerScript = (Resolve-Path (Join-Path $PSScriptRoot '..\ClipboardManager.ps1
 # "Keep pinned entries" of the test instance - its own file (InstanceName), never the user's pinned.dat
 $pinnedFile = Join-Path (Split-Path $managerScript) "pinned-$instanceName.dat"
 if (Test-Path -LiteralPath $pinnedFile) { Remove-Item -LiteralPath $pinnedFile }   # left by an aborted run
+# Its settings file - its own too: psclip reads the theme, the hotkey and the keep-awake time from it, the tray menu
+# saves to it, and saving it applies it at once.
+$settingsFile = Join-Path (Split-Path $managerScript) "settings-$instanceName.ini"
+$settingsLines = '# psclip end-to-end test (deleted when it ends)', "Theme = $Theme", "Hotkey = $($testHotkey.Text)",
+    "KeepAwakeSeconds = $keepAwakeSeconds"
+[IO.File]::WriteAllText($settingsFile, ($settingsLines -join "`r`n") + "`r`n")
 [void](New-Item -ItemType Directory -Force -Path $OutputDirectory)
 $log = Join-Path $OutputDirectory 'manager.log'
 $errorLog = Join-Path $OutputDirectory 'manager.err.log'
 $savedClipboard = Save-Clipboard
 
 Set-Clipboard -Value 'psclip test: initial entry'
-$managerArguments = '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"", '-Theme', $Theme,
-    '-KeepAwakeSeconds', $keepAwakeSeconds, '-InstanceName', $instanceName, '-Hotkey', $testHotkey.Text, '-Verbose'
+$managerArguments = '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$managerScript`"",
+    '-InstanceName', $instanceName, '-Verbose'   # the settings come from $settingsFile
 $manager = Start-Process powershell.exe -NoNewWindow -PassThru `
     -RedirectStandardOutput $log -RedirectStandardError $errorLog -ArgumentList $managerArguments
+
+function Get-TestSetting {
+    # A setting's value as the test instance's settings file has it.
+    param([string]$Name)
+    try {
+        $lines = [IO.File]::ReadAllLines($settingsFile)
+    }
+    catch {
+        return $null   # psclip may be replacing it right now (File.Replace): the caller waits and asks again
+    }
+    foreach ($line in $lines) {
+        if ($line -match "^\s*$Name\s*=\s*(.*?)\s*$") { return $Matches[1] }
+    }
+}
 
 # The window the popup pastes into - a rich text box, to see whether formatting arrives
 $target = [Form]::new()
@@ -102,6 +124,8 @@ try {
     $popup = Find-ManagerWindow 'Clipboard history'
     $hotkeyTaken = -not (Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey)
     Add-Result "Hotkey $($testHotkey.Text) registered" $hotkeyTaken
+    $fromFile = (Get-Content $log -Raw) -match "Settings from .*settings-$instanceName\.ini"
+    Add-Result 'Theme, hotkey and keep-awake time come from the settings file' ($fromFile -and $hotkeyTaken)
 
     # --- clipboard capture ---
     $samples = 'psclip test: alpha', "psclip test: beta line one`r`nline two", 'psclip test: gamma & <special> chars',
@@ -425,6 +449,19 @@ try {
         Hide-TestPopup
     }
     Add-Result 'Tray menu: window size Large, 15 rows' ($largeRows -eq 15) "rows $largeRows"
+    $sizeSaved = Wait-Until { (Get-TestSetting 'Size') -eq 'L' }
+    Add-Result 'Tray menu changes are saved to the settings file' $sizeSaved "Size = $(Get-TestSetting 'Size')"
+
+    # --- settings file: saving it applies the change at once (Size S: 6 rows) ---
+    $edited = @([IO.File]::ReadAllLines($settingsFile)) -replace '^Size\s*=.*$', 'Size = S'   # like an editor
+    [IO.File]::WriteAllLines($settingsFile, [string[]]$edited)
+    $applied = Wait-Until { (Get-Content $log -Raw) -match 'Settings file: Size = S\.' }
+    $smallRows = -1
+    if ($applied -and (Show-TestPopup)) {
+        $smallRows = [TestNative]::VisibleListRows($listBox)
+        Hide-TestPopup
+    }
+    Add-Result 'Saving the settings file applies it at once (Size S, 6 rows)' ($smallRows -eq 6) "rows $smallRows"
 
     # --- tray menu: Change hotkey dialog ---
     $dialog = [IntPtr]::Zero
@@ -457,6 +494,8 @@ try {
         if ($newTaken) { $script:currentHotkeyKeys = 0x11, 0x12, 0x10, 0x78 }   # Ctrl, Alt, Shift, F9
         Add-Result 'New hotkey registered, old one released' ($newTaken -and $oldFree) `
             "new taken: $newTaken, old free: $oldFree"
+        $hotkeySaved = Wait-Until { (Get-TestSetting 'Hotkey') -eq 'Ctrl+Alt+Shift+F9' }
+        Add-Result 'The new hotkey is saved to the settings file' $hotkeySaved "Hotkey = $(Get-TestSetting 'Hotkey')"
     }
 
     # --- tray menu: Dark mode switches the theme ---
@@ -479,6 +518,9 @@ try {
     $lightToDark = (& $isLight $before) -and (& $isDark $after)
     $switched = if ($Theme -eq 'Dark') { $darkToLight } else { $lightToDark }
     Add-Result 'Tray menu: dark mode switches the theme' $switched "brightness before $before, after $after"
+    $otherTheme = if ($Theme -eq 'Dark') { 'Light' } else { 'Dark' }
+    $themeSaved = Wait-Until { (Get-TestSetting 'Theme') -eq $otherTheme }
+    Add-Result 'The theme is saved to the settings file' $themeSaved "Theme = $(Get-TestSetting 'Theme')"
 
     # --- tray menu: Memory limit > 1 GB ---
     $memoryChanged = $false
@@ -568,7 +610,7 @@ try {
         "longest idle $idleOn ms, limit $limit ms"
     Add-Result 'Keep awake can be switched off again' ($idleOff -gt $limit + 2500) "longest idle $idleOff ms"
 
-    # --- Keep pinned entries across a restart: switch on, exit, start again with -KeepPinned ---
+    # --- Keep pinned entries across a restart: switch on (saved to the settings file), exit, start again ---
     $restartLog = Join-Path $OutputDirectory 'manager-restart.log'
     $restored = $false
     $switchedOn = (Open-TrayMenu) -and (Send-MenuKeys $keepPinnedItem)
@@ -577,14 +619,31 @@ try {
         [void][TestNative]::PostMessage($hostWindow, [TestNative]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero)
         if ($manager.WaitForExit(5000)) {
             $manager = Start-Process powershell.exe -NoNewWindow -PassThru -RedirectStandardOutput $restartLog `
-                -RedirectStandardError "$errorLog.restart" -ArgumentList ($managerArguments + '-KeepPinned')
+                -RedirectStandardError "$errorLog.restart" -ArgumentList $managerArguments
             $restored = Wait-Until {
                 (Test-Path $restartLog) -and ((Get-Content $restartLog -Raw) -cmatch 'Running \(PID')
             } 15000
             $restored = $restored -and ((Get-Content $restartLog -Raw) -match 'Restored [1-9]\d* pinned entries')
         }
     }
-    Add-Result 'Pinned entries come back after a restart (-KeepPinned)' $restored $restartLog
+    Add-Result 'Pinned entries come back after a restart (KeepPinned in the settings file)' $restored $restartLog
+
+    # --- after the restart: the settings saved above (hotkey Ctrl+Alt+Shift+F9, size S, the other theme) ---
+    $restartRows = $restartBrightness = -1
+    if ($restored) {
+        $hostWindow = Find-ManagerWindow $instanceName
+        $popup = Find-ManagerWindow 'Clipboard history'
+        $listBox = [TestNative]::ChildByClass($popup, 'LISTBOX')
+        $searchBox = [TestNative]::EditBox($popup, $false)
+        if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
+            $restartRows = [TestNative]::VisibleListRows($listBox)
+            $restartBrightness = Get-WindowBrightness $popup
+            Hide-TestPopup
+        }
+    }
+    $themeKept = if ($Theme -eq 'Dark') { & $isLight $restartBrightness } else { & $isDark $restartBrightness }
+    Add-Result 'The saved settings apply after a restart: hotkey, size, theme' ($restartRows -eq 6 -and $themeKept) `
+        "rows $restartRows, brightness $restartBrightness"
 }
 finally {
     $target.Dispose()
@@ -597,6 +656,7 @@ finally {
     Add-Result 'Graceful shutdown via WM_CLOSE' $exited
     if (-not $exited) { Stop-Process -Id $manager.Id -Force }
     if (Test-Path -LiteralPath $pinnedFile) { Remove-Item -LiteralPath $pinnedFile }
+    Remove-Item -LiteralPath $settingsFile, "$settingsFile.tmp" -ErrorAction SilentlyContinue
 
     Restore-Clipboard $savedClipboard
     $results | Format-Table -AutoSize -Wrap | Out-String -Width 160 | Write-Host

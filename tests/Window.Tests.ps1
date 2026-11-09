@@ -64,6 +64,8 @@ Describe 'Popup window and tray menu, built hidden (never shown)' {
         Update-TrayMenu
         $Ui.KeepPinnedMenuItem.Checked | Should Be $false
         $Ui.MemoryMenuItem.Text | Should Match '^Memory limit \(.+ used\)$'
+        $Ui.KeepAwakeMenuItem.ToolTipText | Should Match 'after 30 s without'
+        $Ui.SettingsMenuItem.ToolTipText | Should Match '^Creates settings\.ini with the current settings'
     }
 
     It 'lists pinned entries first, and previews a text and an image' {

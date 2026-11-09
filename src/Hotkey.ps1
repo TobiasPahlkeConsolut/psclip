@@ -160,7 +160,10 @@ function Edit-Hotkey {
     $State.HotkeyActive = $false
 
     try {
-        if (-not (Show-HotkeyDialog) -and $wasActive) {
+        if (Show-HotkeyDialog) {
+            Save-Setting 'Hotkey'
+        }
+        elseif ($wasActive) {
             [void](Register-Hotkey $State.HotkeySpec)   # cancelled: restore the previous hotkey
         }
     }

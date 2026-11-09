@@ -333,7 +333,7 @@ function Show-EditDialog {
     $box.WordWrap = $true
     $box.ScrollBars = 'Vertical'
     $box.BorderStyle = 'None'
-    $box.MaxLength = $MaxEntryLength
+    $box.MaxLength = $State.MaxEntryLength
     $box.Dock = 'Fill'
     $box.BackColor = $colors.Back
     $box.ForeColor = $colors.Text
@@ -399,7 +399,10 @@ function New-TrayIcon {
     $Ui.HotkeyMenuItem.add_Click({ [void]$Ui.Form.BeginInvoke([Action] { Edit-Hotkey }) })
 
     $Ui.DarkModeMenuItem = $menu.Items.Add('Dark mode')
-    $Ui.DarkModeMenuItem.add_Click({ Switch-DarkMode })
+    $Ui.DarkModeMenuItem.add_Click({
+        Switch-DarkMode
+        Save-Setting 'Theme'
+    })
 
     $Ui.SizeMenuItem = [ToolStripMenuItem]::new('Window size')
     $sizeOptions = @{ Tag = 'S'; Text = 'Small' }, @{ Tag = 'M'; Text = 'Medium' }, @{ Tag = 'L'; Text = 'Large' }
@@ -409,6 +412,7 @@ function New-TrayIcon {
         $item.add_Click({
             param($source, $e)
             $State.PopupSize = $source.Tag
+            Save-Setting 'Size'
         })
     }
     [void]$menu.Items.Add($Ui.SizeMenuItem)
@@ -424,6 +428,7 @@ function New-TrayIcon {
             param($source, $e)
             $State.OpenAt = $source.Tag
             Write-Verbose "Popup opens at: $($source.Tag)."
+            Save-Setting 'OpenAt'
         })
     }
     $Ui.OpenAtMenuItem.DropDown.ShowItemToolTips = $true
@@ -437,21 +442,29 @@ function New-TrayIcon {
         $item.add_Click({
             param($source, $e)
             Set-MemoryLimit $source.Tag
+            Save-Setting 'MaxMemory'
         })
     }
     [void]$menu.Items.Add($Ui.MemoryMenuItem)
 
     $Ui.KeepPinnedMenuItem = $menu.Items.Add('Keep pinned entries')
-    $Ui.KeepPinnedMenuItem.ToolTipText = 'Saves the pinned entries encrypted to pinned.dat; loaded at start with ' +
-        '-KeepPinned. Off deletes the file'
-    $Ui.KeepPinnedMenuItem.add_Click({ Set-KeepPinned (-not $State.KeepPinned) })
+    $Ui.KeepPinnedMenuItem.ToolTipText = 'Saves the pinned entries encrypted to pinned.dat and loads them at the ' +
+        'next start. Off deletes the file'
+    $Ui.KeepPinnedMenuItem.add_Click({
+        Set-KeepPinned (-not $State.KeepPinned)
+        Save-Setting 'KeepPinned'   # also when it could not be switched: the file then keeps the actual state
+    })
     [void]$menu.Items.Add([ToolStripSeparator]::new())
 
     $Ui.KeepAwakeMenuItem = $menu.Items.Add('Keep awake')
-    $Ui.KeepAwakeMenuItem.ToolTipText = "Presses the F15 key after $KeepAwakeSeconds s without mouse or keyboard input"
-    $Ui.KeepAwakeMenuItem.add_Click({ Set-KeepAwake (-not $State.KeepAwake) })
+    $Ui.KeepAwakeMenuItem.add_Click({
+        Set-KeepAwake (-not $State.KeepAwake)
+        Save-Setting 'KeepAwake'
+    })
     [void]$menu.Items.Add([ToolStripSeparator]::new())
 
+    $Ui.SettingsMenuItem = $menu.Items.Add('Edit settings file...')
+    $Ui.SettingsMenuItem.add_Click({ Open-SettingsFile })
     $menu.Items.Add('Exit').add_Click({ $Ui.AppContext.ExitThread() })
     $menu.ShowItemToolTips = $true
     $menu.add_Opening({ Update-TrayMenu })
@@ -483,6 +496,15 @@ function Update-TrayMenu {
     }
     $Ui.KeepPinnedMenuItem.Checked = $State.KeepPinned
     $Ui.KeepAwakeMenuItem.Checked = $State.KeepAwake
+    $Ui.KeepAwakeMenuItem.ToolTipText =
+        "Presses the F15 key after $($State.KeepAwakeSeconds) s without mouse or keyboard input"
+    $fileName = Split-Path -Leaf $State.SettingsFile
+    $Ui.SettingsMenuItem.ToolTipText = if (Test-Path -LiteralPath $State.SettingsFile -PathType Leaf) {
+        "Opens $fileName, where the settings of this menu are kept. Saved changes apply at once"
+    }
+    else {
+        "Creates $fileName with the current settings and opens it - from then on, the settings of this menu are kept"
+    }
 }
 
 function Update-TrayText {

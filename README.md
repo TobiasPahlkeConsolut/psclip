@@ -1,8 +1,8 @@
 # psclip
 
-A small clipboard history for Windows: a PowerShell script, no extra software, no admin rights - and **nothing is
-written to disk** unless you ask for it. The history lives in memory only; just the pinned entries can be kept,
-encrypted.
+A small clipboard history for Windows: a PowerShell script, no extra software, no admin rights - and **the history
+is never written to disk**: it lives in memory only. Just the pinned entries can be kept, encrypted, and the settings
+in a text file.
 
 <p>
   <img src="docs/popup-dark.png" alt="History popup in dark mode, with a pinned entry" width="49%">
@@ -18,7 +18,8 @@ encrypted.
 - **Finds text in screenshots**: Windows' built-in OCR recognizes it in the background, offline
 - **Easy to read**: two lines per entry, shaded rows, the filter's words highlighted, numbered rows for `Alt+1` ...
 - **Preview** (`F3`), **edit** (`F2`) and **pin** (`Ctrl+P`) entries - pinned entries can survive restarts
-- Dark or light, three sizes, settings in the tray menu; skips what password managers mark as private
+- Dark or light, three sizes; settings in the tray menu and in a simple text file (`settings.ini`); skips what
+  password managers mark as private
 - **Keep awake** (optional, unrelated to the clipboard): keeps the session from going idle
 
 ## Install
@@ -60,7 +61,7 @@ Right-click an entry for the same actions, and the tray icon (a small blue clipb
 
 - [Install, update, uninstall](docs/install.md) - with git, what `Install.ps1` does, the execution policy
 - [Usage](docs/usage.md) - popup, text in images, preview, editing, tray menu, keep awake, keeping pinned entries
-- [Options](docs/options.md) - all parameters and their defaults, hotkeys
+- [Options](docs/options.md) - all settings and their defaults, the settings file, hotkeys
 - [Limitations](docs/limitations.md)
 - [Development](docs/development.md) - how it works, tests, releases
 - [Changelog](CHANGELOG.md)

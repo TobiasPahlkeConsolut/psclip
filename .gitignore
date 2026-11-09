@@ -3,5 +3,9 @@
 /pinned*.dat
 /pinned*.dat.*
 
+# Settings (settings.ini, settings-<InstanceName>.ini and the temporary file while writing) - each user's own
+/settings*.ini
+/settings*.ini.*
+
 # Release ZIPs built by tools\New-ReleaseZip.ps1 - attached to the GitHub release, not committed
 /dist/
