@@ -43,6 +43,9 @@ function Show-Popup {
     }
     $anchor = if ($caret.IsEmpty) { [Cursor]::Position } else { $caret.Location }
     $area = [Screen]::FromPoint($anchor).WorkingArea
+    $frame = $form.Height - $form.ClientSize.Height
+    $minimum = $frame + $Ui.SearchPanel.Height + 3 * $Ui.List.ItemHeight + $Ui.Status.Height   # three rows
+    $form.Height = Get-PopupHeight -Height $form.Height -Caret $caret -Area $area -Minimum $minimum
     $form.Location = Get-PopupLocation -Size $form.Size -Pointer ([Cursor]::Position) -Caret $caret -Area $area
 
     $form.Show()
@@ -50,6 +53,19 @@ function Show-Popup {
     Write-Verbose "Popup in front: $([PsClip.Native]::LastActivation)."
     $form.Activate()
     [void]$Ui.Search.Focus()
+}
+
+function Get-PopupHeight {
+    # At the text cursor, the popup must not cover the line you are typing in: if it fits neither below nor above
+    # it (a tall size on a screen with high display scaling), it gets the height of the larger of the two - fewer
+    # rows, but at least Minimum (then it covers the line after all).
+    param([int]$Height, [Rectangle]$Caret, [Rectangle]$Area, [int]$Minimum)
+
+    if ($Caret.IsEmpty) { return $Height }
+    $gap = 4   # as in Get-PopupLocation
+    $room = [Math]::Max($Area.Bottom - $Caret.Bottom - $gap, $Caret.Top - $gap - $Area.Top)
+    if ($Height -le $room) { return $Height }
+    [Math]::Max($room, [Math]::Min($Minimum, $Height))
 }
 
 function Get-PopupLocation {

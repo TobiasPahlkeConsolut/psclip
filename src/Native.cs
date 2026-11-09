@@ -27,6 +27,7 @@ namespace PsClip
         [DllImport("user32.dll")] public static extern bool DestroyIcon(IntPtr handle);
         [DllImport("user32.dll")] public static extern uint GetClipboardSequenceNumber();
         [DllImport("user32.dll")] static extern bool IsClipboardFormatAvailable(uint format);
+        [DllImport("user32.dll")] static extern IntPtr GetOpenClipboardWindow();
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern uint RegisterClipboardFormat(string name);
         [DllImport("dwmapi.dll")]
         static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
@@ -306,6 +307,10 @@ namespace PsClip
         {
             int[] keys = { 0x10, 0x11, 0x12, 0x5B, 0x5C, 0x0D };   // Shift, Ctrl, Alt, LWin, RWin, Enter
             for (int i = 0; i < 100 && AnyKeyDown(keys); i++) Wait(10);
+            // Programs that watch the clipboard (Teams, remote desktop clients) open it right after psclip put the
+            // entry there; a Ctrl+V meanwhile finds it busy and pastes nothing. So wait until nobody holds it open
+            // (at most 0.3 s - pasting then is still better than not pasting).
+            for (int i = 0; i < 30 && GetOpenClipboardWindow() != IntPtr.Zero; i++) Wait(10);
             if (AnyKeyDown(keys) || GetForegroundWindow() != target) return false;
 
             Input[] inputs =

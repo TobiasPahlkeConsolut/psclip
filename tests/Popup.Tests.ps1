@@ -124,6 +124,31 @@ Describe 'Get-PopupLocation' {
     }
 }
 
+Describe 'Get-PopupHeight (at the text cursor)' {
+    $area = [System.Drawing.Rectangle]::new(0, 0, 1920, 1000)
+
+    It 'keeps the height when the popup fits below or above the text cursor' {
+        Get-PopupHeight -Height 600 -Caret ([System.Drawing.Rectangle]::new(100, 200, 2, 20)) -Area $area -Minimum 200 |
+            Should Be 600   # below: 776 free
+        Get-PopupHeight -Height 600 -Caret ([System.Drawing.Rectangle]::new(100, 800, 2, 20)) -Area $area -Minimum 200 |
+            Should Be 600   # above: 796 free
+    }
+
+    It 'gets the height of the larger side when it fits on neither - so it never covers the line typed in' {
+        $caret = [System.Drawing.Rectangle]::new(100, 343, 2, 24)   # 629 free below, 339 above
+        $height = Get-PopupHeight -Height 880 -Caret $caret -Area $area -Minimum 200
+        $height | Should Be (1000 - 367 - 4)
+        Get-PopupLocation ([System.Drawing.Size]::new(560, $height)) ([System.Drawing.Point]::new(0, 0)) $caret $area |
+            Should Be ([System.Drawing.Point]::new(100, 367 + 4))   # right below the text cursor
+    }
+
+    It 'keeps at least the minimum, and leaves the height alone at the mouse pointer' {
+        $caret = [System.Drawing.Rectangle]::new(100, 480, 2, 20)   # about 490 free on each side
+        Get-PopupHeight -Height 880 -Caret $caret -Area $area -Minimum 600 | Should Be 600
+        Get-PopupHeight -Height 880 -Caret ([System.Drawing.Rectangle]::Empty) -Area $area -Minimum 200 | Should Be 880
+    }
+}
+
 Describe 'Hide-Popup' {
     It 'clears the list, the preview and the filter text so that nothing stays in the hidden window' {
         Reset-TestState

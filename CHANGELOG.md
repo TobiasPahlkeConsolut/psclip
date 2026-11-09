@@ -1,7 +1,11 @@
 # Changelog
 
-## Unreleased
+## 1.1.2 - 2026-11-09
 
+- At the text cursor, the popup no longer covers the line you are typing in when it fits neither below nor above it
+  (e.g. medium size on a screen with high display scaling): it gets shorter instead, at least three entries
+- Pasting waits a moment (at most 0.3 s) while another program - Teams, a remote desktop client - has the clipboard
+  open, instead of pasting nothing
 - Switching *Keep pinned entries* off and setting an unreadable `pinned.dat` aside also try again briefly while a
   virus scanner holds the file, like saving does
 - Stronger unit tests after a review: they now also cover the clipboard security rules through the real COM path,
