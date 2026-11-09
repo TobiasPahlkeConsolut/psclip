@@ -43,6 +43,32 @@ namespace PsClipTest
         public void SetData(ref FORMATETC f, ref STGMEDIUM m, bool r) { inner.SetData(ref f, ref m, r); }
     }
 
+    // Counts how often BinaryFormatter recreates it - another program's clipboard data must never be deserialized.
+    [System.Serializable]
+    public class DeserializationCanary : System.Runtime.Serialization.ISerializable
+    {
+        public static int Deserialized;
+        public DeserializationCanary() { }
+        protected DeserializationCanary(System.Runtime.Serialization.SerializationInfo info,
+            System.Runtime.Serialization.StreamingContext context)
+        {
+            Deserialized++;
+        }
+        public void GetObjectData(System.Runtime.Serialization.SerializationInfo info,
+            System.Runtime.Serialization.StreamingContext context) { }
+    }
+
+    // A DataObject that notes which formats are read from it
+    public class RecordingDataObject : System.Windows.Forms.DataObject
+    {
+        public readonly System.Collections.Generic.List<string> Read = new System.Collections.Generic.List<string>();
+        public override object GetData(string format, bool autoConvert)
+        {
+            Read.Add(format);
+            return base.GetData(format, autoConvert);
+        }
+    }
+
     public static class FileLock
     {
         // Holds a file open without sharing for a while, released by another thread - like a virus scanner.
@@ -60,7 +86,7 @@ namespace PsClipTest
         }
     }
 }
-'@
+'@ -ReferencedAssemblies System.Windows.Forms
 }
 
 function New-OleData {
@@ -93,7 +119,9 @@ function Reset-TestState {
         HotkeyActive        = $true
         ThemeSetting        = 'Dark'
         PopupSize           = 'M'
+        OpenAt              = 'Mouse'
         PreviewVisible      = $false
+        PreviewDefault      = $false
         PreviewTextShare    = 0.3
         PreviewEntry        = $null
         FilterTerms         = [string[]]@()
@@ -117,6 +145,7 @@ function Reset-TestState {
     $script:MaxListItems = 1000
     $script:MaxEntryLength = 1000000
     $script:MaxImageBytes = 50MB
+    $script:MaxPreviewLength = 100000
     $script:KeepAwakeSeconds = 30
 }
 

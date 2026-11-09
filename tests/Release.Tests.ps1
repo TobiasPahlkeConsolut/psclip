@@ -54,8 +54,20 @@ Describe 'Get-ReleaseNotes' {
 }
 
 Describe 'New-ReleaseZip' {
+    # Built from a copy of the repository with everything that must stay out - not from the real one, where a
+    # pinned.dat may or may not exist (and which a test must never read).
     Add-Type -AssemblyName System.IO.Compression, System.IO.Compression.FileSystem
-    $zipPath = New-ReleaseZip -Root $repository -Destination $TestDrive
+    $fake = Join-Path $TestDrive 'repository'
+    [void](New-Item -ItemType Directory -Path $fake)
+    $copied = 'ClipboardManager.ps1', 'Install.ps1', 'README.md', 'CHANGELOG.md', 'LICENSE', 'AGENTS.md', 'src', 'docs',
+        'tests', 'tools'
+    foreach ($item in $copied) {
+        Copy-Item -LiteralPath (Join-Path $repository $item) -Destination (Join-Path $fake $item) -Recurse
+    }
+    foreach ($private in 'pinned.dat', 'pinned-Test.dat', 'pinned.dat.tmp', 'pinned.dat.unreadable-1', 'dist\old.zip') {
+        [void](New-Item -ItemType File -Force -Path (Join-Path $fake $private))
+    }
+    $zipPath = New-ReleaseZip -Root $fake -Destination (Join-Path $TestDrive 'out')
     $archive = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
     $names = @($archive.Entries | ForEach-Object { $_.FullName })
     $archive.Dispose()

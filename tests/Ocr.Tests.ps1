@@ -61,6 +61,22 @@ Describe 'Text in images (OCR)' {
         $Ui.OcrTimer.Enabled | Should Be $false
     }
 
+    Context 'a pinned image - e.g. restored from pinned.dat at startup' {
+        Mock Start-WinRtTask { 'started' }   # the real decoding call is made; only its waiting is left out
+
+        It 'is recognized too, not only images in the history' {
+            Add-Type -AssemblyName System.Runtime.WindowsRuntime
+            $null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Foundation, ContentType = WindowsRuntime]
+            $script:Ui.OcrTimer = [pscustomobject]@{ Enabled = $true }
+            $pinned = New-ImageEntry 'Red'
+            $State.Pinned.Add($pinned)
+            $State.OcrQueue.Enqueue($pinned)
+            Step-Ocr
+            [object]::ReferenceEquals($State.OcrJob.Entry, $pinned) | Should Be $true
+            Assert-MockCalled Start-WinRtTask -Scope It -Exactly 1
+        }
+    }
+
     It 'gives up on an image whose recognition failed (no text instead of "reading text...")' {
         $entry = New-ImageEntry
         $failed = [System.Threading.Tasks.Task]::FromException([InvalidOperationException]::new('test'))

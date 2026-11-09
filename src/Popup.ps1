@@ -81,9 +81,13 @@ function Reset-PopupSize {
     if ($State.PreviewVisible) { $height += $Ui.Preview.Height + $Ui.PreviewSplitter.Height }
     $form = $Ui.Form
     $frame = $form.Height - $form.ClientSize.Height   # title bar and borders
-    $screenHeight = [Screen]::FromPoint([Cursor]::Position).WorkingArea.Height
-    $height = [Math]::Min($height, $screenHeight - $frame)
+    $height = [Math]::Min($height, (Get-ScreenHeight) - $frame)
     $form.ClientSize = [Size]::new([int]($popupSize.Width * $Ui.Scale), $height)
+}
+
+function Get-ScreenHeight {
+    # Height of the working area of the screen with the mouse pointer - a function of its own for the tests.
+    [Screen]::FromPoint([Cursor]::Position).WorkingArea.Height
 }
 
 function Move-PopupIntoScreen {

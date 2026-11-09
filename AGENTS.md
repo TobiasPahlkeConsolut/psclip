@@ -54,7 +54,7 @@ features, quick install, key table, links.
 - **Source files must be pure ASCII** (`.ps1` and `.cs`). PowerShell 5.1 reads BOM-less files as ANSI, so any
   non-ASCII character is garbled. Write special characters as `[char]0x21B5` etc. (that is also why the default
   hotkey is `Ctrl+Oemtilde`, not `Ctrl+` + O-umlaut; `Get-KeyDisplayName` shows the key's character to the user).
-  Check with `@([IO.File]::ReadAllBytes($path) | Where-Object { $_ -gt 127 }).Count` (must be 0).
+  Check with `@([IO.File]::ReadAllBytes($path) -gt 127).Count` (must be 0).
   Markdown files may contain UTF-8.
 - **No new dependencies.** Only what ships with Windows (PowerShell 5.1, .NET Framework 4.x, WinForms, Pester
   3.4). Never install software (no winget, no PSGallery modules) without asking.
@@ -221,6 +221,15 @@ features, quick install, key table, links.
 - In tests, find windows and controls by process id and class name, not by asking which control has the focus:
   right after a window appears the focus may still be elsewhere.
 - Pester 3: `Assert-MockCalled` counts calls in the whole `Describe` by default - always pass `-Scope It`.
+- Pester 3: a `Mock` inside an `It` (or `BeforeEach`) stays active until the end of the `Describe` - put a mock that
+  differs per test into a `Context` of its own, together with its `It`.
+- Unit tests never touch the real clipboard or screen: the app reaches them through small functions the tests
+  replace (`Get-ClipboardDataObject`, `Get-ClipboardSequence`, `Test-ClipboardContent`, `Get-ScreenHeight`).
+  Deserialization rules are tested through `New-OleData` (the COM path) with `PsClipTest.DeserializationCanary`,
+  which counts how often BinaryFormatter recreated it - a plain `DataObject` never deserializes, so a test with it
+  cannot fail. Window code is tested by building the windows hidden after `Initialize-UiMetrics` (Window.Tests.ps1);
+  `Initialize-Ui` would make the whole test process DPI-aware. `Reset-TestState` must have exactly the keys of the
+  real `$State` (`tests/Style.Tests.ps1` compares them).
 - The end-to-end test opens the popup by pressing the test hotkey for real (while its own window is in front): a
   posted `WM_HOTKEY` does not give psclip the right to take the foreground, which forces the fallback above.
 - Commit messages from PowerShell: write them to a temporary file with `[IO.File]::WriteAllText($path, $message,

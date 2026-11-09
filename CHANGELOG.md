@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Switching *Keep pinned entries* off and setting an unreadable `pinned.dat` aside also try again briefly while a
+  virus scanner holds the file, like saving does
+- Stronger unit tests after a review: they now also cover the clipboard security rules through the real COM path,
+  the encryption scope, damaged pinned files, the busy clipboard, and the popup and tray menu (built hidden)
+
 ## 1.1.1 - 2026-11-06
 
 - A copy is no longer lost now and then when another program - Teams or a remote desktop client, also in the

@@ -29,7 +29,7 @@ namespace PsClip
         {
             if (entries.Count == 0)
             {
-                RetryWhileInUse(delegate { File.Delete(path); });   // no error when there is no file
+                Delete(path);
                 return;
             }
             byte[] data = ProtectedData.Protect(Serialize(entries), Entropy, DataProtectionScope.CurrentUser);
@@ -54,6 +54,18 @@ namespace PsClip
                     File.Move(temp, path);
                 }
             });
+        }
+
+        // Deleting and renaming the file (switching "Keep pinned entries" off, setting an unreadable file aside) -
+        // with the same patience as saving.
+        public static void Delete(string path)
+        {
+            RetryWhileInUse(delegate { File.Delete(path); });   // no error when there is no file
+        }
+
+        public static void Rename(string path, string newPath)
+        {
+            RetryWhileInUse(delegate { File.Move(path, newPath); });
         }
 
         // A virus scanner or backup program may hold the file for a moment - typically right after it was written,

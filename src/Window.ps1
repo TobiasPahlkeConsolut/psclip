@@ -23,7 +23,12 @@ function Initialize-Ui {
         param($source, $e)
         Write-Warning "Error in event handler: $($e.Exception.Message)"
     })
+    Initialize-UiMetrics
+}
 
+function Initialize-UiMetrics {
+    # Display scaling, fonts and column widths - without the process-wide settings of Initialize-Ui, so that
+    # the unit tests can build the windows hidden.
     $graphics = [Graphics]::FromHwnd([IntPtr]::Zero)
     $Ui.Scale = $graphics.DpiX / 96.0
     $graphics.Dispose()

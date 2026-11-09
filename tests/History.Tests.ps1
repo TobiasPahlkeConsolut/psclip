@@ -71,21 +71,26 @@ Describe 'Read-ClipboardEntry' {
         (Read-ClipboardEntry $data).Text | Should BeExactly 'text'
     }
 
-    It 'reads CanIncludeInClipboardHistory as raw bytes, never as an object' {
-        # A serialized object (what an attacker would put there) comes back as bytes - nothing is
-        # deserialized - and the text is kept.
+    It 'never deserializes CanIncludeInClipboardHistory - another program could put any object there' {
+        # Through COM, like from the real clipboard: DataObject.GetData would recreate the object with
+        # BinaryFormatter and run its code - the canary counts that.
+        [PsClipTest.DeserializationCanary]::Deserialized = 0
         $data = New-Data 'text'
-        $data.SetData('CanIncludeInClipboardHistory', $false, [System.Collections.Generic.List[string]]::new())
-        $bytes = [PsClip.Native]::ReadFormatBytes($data, 'CanIncludeInClipboardHistory', 4096)
-        ($bytes -is [byte[]]) | Should Be $true
-        (Read-ClipboardEntry $data).Text | Should BeExactly 'text'
+        $data.SetData('CanIncludeInClipboardHistory', $false, [PsClipTest.DeserializationCanary]::new())
+        (Read-ClipboardEntry (New-OleData $data)).Text | Should BeExactly 'text'
+        [PsClipTest.DeserializationCanary]::Deserialized | Should Be 0
+        $null = (New-OleData $data).GetData('CanIncludeInClipboardHistory')   # what the canary detects
+        [PsClipTest.DeserializationCanary]::Deserialized | Should Be 1
     }
 
     It 'skips too long text without reading its formatting' {
         $script:MaxEntryLength = 10
-        $data = New-Data ('x' * 11)
+        $data = [PsClipTest.RecordingDataObject]::new()
+        $data.SetText('x' * 11)
         $data.SetData([System.Windows.Forms.DataFormats]::Html, '<b>x</b>')
+        $data.SetData([System.Windows.Forms.DataFormats]::Rtf, '{\rtf1 x}')
         Read-ClipboardEntry $data | Should BeNullOrEmpty
+        $data.Read -join ', ' | Should BeExactly ([System.Windows.Forms.DataFormats]::UnicodeText)
     }
 
     It 'takes the image when the text next to it is blank' {
@@ -109,6 +114,14 @@ Describe 'Read-ClipboardEntry' {
         $bitmap = New-Data
         $bitmap.SetData('System.Drawing.Bitmap', $false, [System.Drawing.Bitmap]::new(7, 5))
         Read-ClipboardEntry (New-OleData $bitmap) | Should BeNullOrEmpty
+        # Whatever object another program puts there: not recreated (the canary counts it)
+        [PsClipTest.DeserializationCanary]::Deserialized = 0
+        foreach ($format in 'System.String', 'System.Drawing.Bitmap') {
+            $data = New-Data
+            $data.SetData($format, $false, [PsClipTest.DeserializationCanary]::new())
+            Read-ClipboardEntry (New-OleData $data) | Should BeNullOrEmpty
+        }
+        [PsClipTest.DeserializationCanary]::Deserialized | Should Be 0
     }
 }
 
@@ -195,7 +208,8 @@ Describe 'Image entries' {
         $data.GetImage().Width | Should Be 40
         $data.GetDataPresent('PNG') | Should Be $true
         $data.GetDataPresent([System.Windows.Forms.DataFormats]::UnicodeText) | Should Be $false
-        $data.GetFormats($false) -join ', ' | Should Not Match 'System\.Drawing\.Bitmap'
+        # Seen through COM, like by the program that pastes - SetImage would add "System.Drawing.Bitmap" there
+        (New-OleData $data).GetFormats($false) -join ', ' | Should Not Match 'System\.Drawing\.Bitmap'
     }
 
     It 'show their size in the list and are found by the word image' {
@@ -225,6 +239,21 @@ Describe 'Receive-ClipboardChange' {
         $State.History.Count | Should Be 0
     }
 
+    Context 'while the popup is open' {
+        Mock Update-PopupList {}
+        Mock Get-SelectedEntry { $script:selected }
+
+        It 'refreshes the list and keeps the same entry selected - not the same row' {
+            $script:selected = [PsClip.ClipEntry]::new('selected')
+            $script:Ui.Form = [pscustomobject]@{ Visible = $true }
+            $script:Ui.List = [pscustomobject]@{ SelectedIndex = 3 }
+            Receive-ClipboardChange
+            Assert-MockCalled Update-PopupList -Scope It -Exactly 1 -ParameterFilter {
+                $SelectIndex -eq 3 -and [object]::ReferenceEquals($SelectEntry, $script:selected)
+            }
+        }
+    }
+
     It 'reads a change once after the delay, however many notifications came until then' {
         Request-ClipboardRead
         Request-ClipboardRead   # e.g. set, then flush
@@ -238,10 +267,58 @@ Describe 'Receive-ClipboardChange' {
     }
 }
 
+Describe 'Reading the clipboard itself (Read-ClipboardEntry without -Data)' {
+    BeforeEach { Reset-TestState }
+
+    Context 'nothing read, although Windows says there is text or an image' {
+        Mock Get-ClipboardDataObject { [System.Windows.Forms.DataObject]::new() }   # what a refused read gives
+        Mock Test-ClipboardContent { $true }
+
+        It 'reports the clipboard as busy, so that the caller reads again' {
+            { Read-ClipboardEntry } | Should Throw 'busy'
+        }
+    }
+
+    Context 'the clipboard really holds neither text nor an image (or only private content)' {
+        Mock Get-ClipboardDataObject { [System.Windows.Forms.DataObject]::new() }
+        Mock Test-ClipboardContent { $false }
+
+        It 'returns nothing, without an error' {
+            Read-ClipboardEntry | Should BeNullOrEmpty
+        }
+    }
+
+    Context 'a normal read' {
+        Mock Get-ClipboardDataObject {
+            $data = [System.Windows.Forms.DataObject]::new()
+            $data.SetText('fine')
+            $data
+        }
+        Mock Test-ClipboardContent { throw 'not needed when the text was read' }
+
+        It 'reads the text' {
+            (Read-ClipboardEntry).Text | Should BeExactly 'fine'
+        }
+    }
+}
+
 Describe 'Receive-ClipboardChange while another program holds the clipboard' {
     BeforeEach {
         Reset-TestState
         $script:Ui.List = [pscustomobject]@{ SelectedIndex = -1 }
+        $script:sequence = 1000
+    }
+    Mock Get-ClipboardSequence { $script:sequence }   # not the real clipboard: a copy meanwhile would count
+
+    It 'gives every new clipboard change its own retries' {
+        Mock Read-ClipboardEntry { throw 'The clipboard was busy' }
+        Receive-ClipboardChange
+        for ($i = 0; $i -lt 5; $i++) { Receive-PendingClipboardChange }
+        $script:sequence = 1001   # the next copy
+        Receive-ClipboardChange
+        $Ui.ClipboardTimer.Enabled | Should Be $true
+        for ($i = 0; $i -lt 5; $i++) { Receive-PendingClipboardChange }
+        Assert-MockCalled Read-ClipboardEntry -Scope It -Exactly 8   # four reads for each change
     }
 
     It 'reads again a few times, then gives up on that change' {
@@ -275,9 +352,11 @@ Describe 'New-ClipboardData' {
     }
 
     It 'puts only the text on the clipboard with -PlainText' {
-        $data = New-ClipboardData (New-FormattedEntry 'bold' -Rtf '{\rtf1 {\b bold}}') -PlainText
+        $entry = New-FormattedEntry 'bold' -Rtf '{\rtf1 {\b bold}}' -Html '<b>bold</b>'
+        $data = New-ClipboardData $entry -PlainText
         $data.GetText() | Should BeExactly 'bold'
         $data.GetDataPresent([System.Windows.Forms.DataFormats]::Rtf) | Should Be $false
+        $data.GetDataPresent([System.Windows.Forms.DataFormats]::Html) | Should Be $false
     }
 }
 
@@ -475,9 +554,10 @@ Describe 'Update-EntryText (F2)' {
 
     It 'removes another history entry that now has the same text' {
         Add-Entries 'target', 'other'
-        Update-EntryText (Get-Entry 'other') 'target'
+        $edited = Get-Entry 'other'
+        Update-EntryText $edited 'target'
         $State.History.Count | Should Be 1
-        $State.History[0].Text | Should BeExactly 'target'
+        [object]::ReferenceEquals($State.History[0], $edited) | Should Be $true   # the edited one stays
     }
 
     It 'saves an edited pinned entry with "Keep pinned entries" on' {
@@ -507,7 +587,8 @@ Describe 'Saved pinned entries (-KeepPinned)' {
         Reset-TestState
         $State.KeepPinned = $true
         $State.PinnedFile = Join-Path $TestDrive 'pinned.dat'
-        if (Test-Path -LiteralPath $State.PinnedFile) { Remove-Item -LiteralPath $State.PinnedFile }
+        # Also a temporary file a failed save left, and files set aside - every test starts without them
+        Get-ChildItem -LiteralPath $TestDrive -Filter 'pinned*' | Remove-Item
     }
     Mock Show-TrayWarning {}
 
@@ -616,13 +697,37 @@ Describe 'Saved pinned entries (-KeepPinned)' {
     It 'gives up after a moment when the file stays in use, and says so' {
         Add-Entries 'a', 'b'
         Switch-ClipboardPin (Get-Entry 'a')
-        [PsClipTest.FileLock]::HoldFor($State.PinnedFile, 1500)
-        $watch = [Diagnostics.Stopwatch]::StartNew()
-        Switch-ClipboardPin (Get-Entry 'b')
-        $watch.ElapsedMilliseconds | Should BeLessThan 1200
-        Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It
-        Start-Sleep -Milliseconds 1500   # until the lock is gone again
+        $lock = [System.IO.File]::Open($State.PinnedFile, 'Open', 'ReadWrite', 'None')   # held throughout
+        try {
+            $watch = [Diagnostics.Stopwatch]::StartNew()
+            Switch-ClipboardPin (Get-Entry 'b')
+            $watch.ElapsedMilliseconds | Should BeLessThan 1200
+            Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It
+        }
+        finally {
+            $lock.Dispose()
+        }
         (Read-SavedPins) -join '|' | Should BeExactly 'a'   # the last saved version is intact
+    }
+
+    It 'sets aside a file that decrypts but is damaged inside, instead of refusing it as "in use" forever' {
+        Add-Type -AssemblyName System.Security
+        $entropy = [System.Text.Encoding]::ASCII.GetBytes('psclip.pinned.v1')
+        $scope = [System.Security.Cryptography.DataProtectionScope]::CurrentUser
+        $text = [PsClip.PinnedStore]::Serialize([PsClip.ClipEntry[]]@([PsClip.ClipEntry]::new('text')))
+        $image = [PsClip.PinnedStore]::Serialize([PsClip.ClipEntry[]]@((New-ImageEntry)))
+        [Array]::Clear($image, 43, 8)   # the PNG signature: header, version, count, date, flag, length come first
+        # Cut after the entry count: the end of the data comes too early (an EndOfStreamException - an IOException)
+        foreach ($damaged in [byte[]]$text[0..29], $image) {
+            [System.IO.File]::WriteAllBytes($State.PinnedFile,
+                [System.Security.Cryptography.ProtectedData]::Protect($damaged, $entropy, $scope))
+            Restart-WithSavedPins |
+                Should BeExactly "pinned.dat cannot be read: The file is damaged. 'Keep pinned entries' is off."
+            Set-KeepPinned $true
+            $State.KeepPinned | Should Be $true
+            @(Get-ChildItem -LiteralPath $TestDrive -Filter 'pinned.dat.unreadable-*').Count | Should BeGreaterThan 0
+            Get-ChildItem -LiteralPath $TestDrive -Filter 'pinned*' | Remove-Item
+        }
     }
 
     It 'finds a pinned entry again when its text is copied after the start' {
@@ -655,6 +760,9 @@ Describe 'Saved pinned entries (-KeepPinned)' {
         $entropy = [System.Text.Encoding]::ASCII.GetBytes('psclip.pinned.v1')
         [System.Security.Cryptography.ProtectedData]::Unprotect($bytes, $entropy, $scope).Length |
             Should BeGreaterThan 0
+        # For the user, not the machine: the scope cannot be told by decrypting (CurrentUser also opens a machine-wide
+        # file), so check the blob's flags - CRYPTPROTECT_LOCAL_MACHINE (4) must not be set.
+        [BitConverter]::ToInt32($bytes, 40) -band 4 | Should Be 0
     }
 
     It 'keeps a file it cannot read and switches off; switching on sets the file aside, never overwrites it' {

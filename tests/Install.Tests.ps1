@@ -78,20 +78,29 @@ Describe 'Get-ShortcutArguments' {
             '-Preview -KeepAwake -KeepPinned')
     }
 
-    It 'passes only parameters that ClipboardManager.ps1 has' {
-        # An unknown parameter would stop psclip at logon without any message (headless).
-        $line = Get-ShortcutArguments @{
-            Hotkey = 'Ctrl+Alt+V'; MaxMemory = '1GB'; Theme = 'Light'; Size = 'L'; OpenAt = 'Mouse'
-            KeepAwakeSeconds = 10; Preview = [switch]$true; KeepAwake = [switch]$true; KeepPinned = [switch]$true
+    It "passes on every setting of Install.ps1 that psclip has - and none of the installer's own" {
+        # An unknown parameter would stop psclip at logon without any message (headless). So the test takes the
+        # parameters from Install.ps1 itself and binds all of them, like a user who passes everything.
+        $installer = (Get-Command (Join-Path $PSScriptRoot '..\Install.ps1')).Parameters
+        $manager = (Get-Command $managerScript).Parameters
+        $common = [System.Management.Automation.PSCmdlet]::CommonParameters
+        $bound = [System.Collections.Generic.Dictionary[string, object]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($parameter in $installer.Values) {
+            $choices = @($parameter.Attributes | Where-Object { $_ -is [ValidateSet] } |
+                ForEach-Object { $_.ValidValues })
+            $bound[$parameter.Name] = if ($parameter.SwitchParameter) { [switch]$true }
+                elseif ($parameter.ParameterType -eq [int]) { 10 }
+                elseif ($choices.Count -gt 0) { $choices[-1] }
+                else { 'Ctrl+Alt+F12' }   # the hotkey
         }
+        $line = Get-ShortcutArguments (Get-InstallSettings $bound)
         $parsed = [ArgvParser]::Split('conhost.exe ' + $line)
         $afterFile = $parsed[([array]::IndexOf($parsed, '-File') + 2)..($parsed.Count - 1)]
-        $names = @($afterFile | Where-Object { $_.StartsWith('-') } | ForEach-Object { $_.Substring(1) })
-        $names.Count | Should Be 9
-        $parameters = (Get-Command $managerScript).Parameters
-        foreach ($name in $names) {
-            "$name $($parameters.ContainsKey($name))" | Should BeExactly "$name True"
-        }
+        $passed = @($afterFile | Where-Object { $_.StartsWith('-') } | ForEach-Object { $_.Substring(1) })
+
+        @($passed | Where-Object { -not $manager.ContainsKey($_) }) -join ', ' | Should BeExactly ''
+        $expected = @($installer.Keys | Where-Object { $manager.ContainsKey($_) -and $common -notcontains $_ })
+        @($expected | Where-Object { $passed -notcontains $_ }) -join ', ' | Should BeExactly ''
     }
 
     It 'accepts the parameter dictionary of Install.ps1 ($PSBoundParameters), not just hashtables' {
@@ -148,7 +157,7 @@ Describe 'Get-UnloadedPinnedWarning' {
 
 Describe 'Assert-Hotkey' {
     It 'accepts a valid hotkey' {
-        { Assert-Hotkey 'Ctrl+Alt+V' } | Should Not Throw
+        { Assert-Hotkey 'Ctrl+Alt+F12' } | Should Not Throw   # not Ctrl+Alt+V: that is AltGr+V = @ on some layouts
     }
 
     It 'refuses hotkeys that would block typing, before any shortcut is written' {

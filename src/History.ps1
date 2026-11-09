@@ -13,7 +13,7 @@ function Read-ClipboardEntry {
     param($Data)
 
     $fromClipboard = -not $PSBoundParameters.ContainsKey('Data')
-    if ($fromClipboard) { $Data = [Clipboard]::GetDataObject() }   # throws when the clipboard stays busy
+    if ($fromClipboard) { $Data = Get-ClipboardDataObject }   # throws when the clipboard stays busy
     if ($null -eq $Data) { return $null }
 
     if ($Data.GetDataPresent('ExcludeClipboardContentFromMonitorProcessing') -or
@@ -41,7 +41,7 @@ function Read-ClipboardEntry {
         # Windows says there is text or an image (asked without opening the clipboard), but none could be read:
         # another program had the clipboard open just then - Teams and remote desktop clients read every change.
         $busy = $null -eq $image -and $null -eq $text -and $fromClipboard
-        if ($busy -and [PsClip.Native]::ClipboardHasTextOrImage()) {
+        if ($busy -and (Test-ClipboardContent)) {
             throw [System.IO.IOException]::new('The clipboard was busy - another program had it open.')
         }
         return $image
@@ -64,6 +64,11 @@ function Read-ClipboardEntry {
     }
     $entry
 }
+
+# The real clipboard, behind functions of their own so that the unit tests can replace them (Mock).
+function Get-ClipboardDataObject { [Clipboard]::GetDataObject() }
+function Get-ClipboardSequence { [PsClip.Native]::GetClipboardSequenceNumber() }
+function Test-ClipboardContent { [PsClip.Native]::ClipboardHasTextOrImage() }
 
 function Read-ClipboardImage {
     # An image entry, or $null. Prefers the "PNG" format (keeps transparency) - a custom format, so
@@ -121,7 +126,7 @@ function Receive-PendingClipboardChange {
 function Receive-ClipboardChange {
     # The clipboard change caused by pasting an entry is not recorded again: the entry is already
     # in the history, and a plain-text paste must not replace its formatting.
-    $sequence = [PsClip.Native]::GetClipboardSequenceNumber()
+    $sequence = Get-ClipboardSequence
     if ($sequence -eq $State.OwnClipboardSequence) { return }
 
     try {
@@ -314,7 +319,7 @@ function Set-ClipboardEntry {
     $data = New-ClipboardData $Entry -PlainText:$PlainText
     try {
         [Clipboard]::SetDataObject($data, $true, 10, 100)
-        $State.OwnClipboardSequence = [PsClip.Native]::GetClipboardSequenceNumber()
+        $State.OwnClipboardSequence = Get-ClipboardSequence
     }
     finally {
         # copy = $true: the clipboard holds its own copy now (or none), so the bitmap can go.
@@ -445,7 +450,7 @@ function Set-KeepPinned {
             # Kept under another name: it may still be readable by the right Windows account or computer.
             $setAside = "$($State.PinnedFile).unreadable-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
             try {
-                [System.IO.File]::Move($State.PinnedFile, $setAside)
+                [PsClip.PinnedStore]::Rename($State.PinnedFile, $setAside)
             }
             catch {
                 Show-TrayWarning "$fileName cannot be read, nor renamed. 'Keep pinned entries' stays off."
@@ -466,8 +471,8 @@ function Set-KeepPinned {
     else {
         $State.KeepPinned = $false
         try {
-            [System.IO.File]::Delete($State.PinnedFile)   # no error when there is no file
-            [System.IO.File]::Delete("$($State.PinnedFile).tmp")
+            [PsClip.PinnedStore]::Delete($State.PinnedFile)   # no error when there is no file
+            [PsClip.PinnedStore]::Delete("$($State.PinnedFile).tmp")
         }
         catch {
             Show-TrayWarning "Could not delete the saved pinned entries: $($_.Exception.GetBaseException().Message)"

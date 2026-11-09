@@ -30,7 +30,8 @@ Describe 'Source files' {
 
     It 'are pure ASCII (PowerShell 5.1 reads files without a byte order mark as ANSI)' {
         $nonAscii = foreach ($file in $sourceFiles) {
-            if (@([IO.File]::ReadAllBytes($file.FullName) | Where-Object { $_ -gt 127 }).Count) { $file.Name }
+            # -gt on an array filters it - much faster than piping every byte through Where-Object
+            if (@([IO.File]::ReadAllBytes($file.FullName) -gt 127).Count) { $file.Name }
         }
         @($nonAscii) -join ', ' | Should BeExactly ''
     }
@@ -65,8 +66,35 @@ Describe 'Part files (src)' {
     It 'are all loaded by ClipboardManager.ps1' {
         $entry = [IO.File]::ReadAllText((Join-Path $repository 'ClipboardManager.ps1'))
         $notLoaded = foreach ($part in Get-ChildItem -LiteralPath (Join-Path $repository 'src') -Filter '*.ps1') {
-            if ($entry -notmatch [regex]::Escape("'src\$($part.Name)'")) { $part.Name }
+            # A dot-source line of its own - not just the name somewhere, e.g. in a comment
+            $line = '(?m)^\. \(Join-Path \$PSScriptRoot ' + [regex]::Escape("'src\$($part.Name)'") + '\)\s*$'
+            if ($entry -notmatch $line) { $part.Name }
         }
         @($notLoaded) -join ', ' | Should BeExactly ''
+    }
+}
+
+Describe 'Test state (Reset-TestState in UnitTestSupport.ps1)' {
+    function Get-StateKey {
+        # The keys of the hashtable assigned to a variable, read from the script's syntax tree
+        param([string]$Path, [string]$Variable)
+        $tokens = $errors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+        $assignment = $ast.Find({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                $node.Left.Extent.Text -eq $Variable
+        }, $true)
+        $isHashtable = { param($node) $node -is [System.Management.Automation.Language.HashtableAst] }
+        $table = $assignment.Find($isHashtable, $true)
+        $table.KeyValuePairs | ForEach-Object { $_.Item1.Value }
+    }
+
+    It 'has the keys of the real $State - a key only the tests have would throw in the app (StrictMode)' {
+        $app = @(Get-StateKey (Join-Path $repository 'ClipboardManager.ps1') '$State')
+        $test = @(Get-StateKey (Join-Path $PSScriptRoot 'UnitTestSupport.ps1') '$script:State')
+        $app.Count | Should BeGreaterThan 20
+        @(Compare-Object $app $test | ForEach-Object { "$($_.InputObject) ($($_.SideIndicator))" }) -join ', ' |
+            Should BeExactly ''
     }
 }

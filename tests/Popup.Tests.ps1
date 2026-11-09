@@ -137,22 +137,30 @@ Describe 'Hide-Popup' {
         $script:Ui.List = [System.Windows.Forms.ListBox]::new()
         $script:Ui.PreviewInfo = [pscustomobject]@{ Text = '12 characters' }
         $script:Ui.PreviewText = [pscustomobject]@{ Text = 'secret text' }
-        $script:Ui.PreviewImage = [pscustomobject]@{ Image = $null }
+        $image = New-TestImage
+        $script:Ui.PreviewImage = [pscustomobject]@{ Image = $image }   # a screenshot is history content too
         [void]$Ui.List.Items.Add('secret preview')
         $State.Filtered.Add([PsClip.ClipEntry]::new('secret'))
+        $State.FilterTerms = [string[]]@('secret')
 
         Hide-Popup
 
         $form.Hides | Should Be 1
         $Ui.Search.Text | Should BeExactly ''
         $Ui.List.Items.Count | Should Be 0
+        $Ui.PreviewInfo.Text | Should BeExactly ''
         $Ui.PreviewText.Text | Should BeExactly ''
+        $null -eq $Ui.PreviewImage.Image | Should Be $true
+        { $image.GetPixel(0, 0) } | Should Throw   # disposed (a property would just read as nothing)
         $State.Filtered.Count | Should Be 0
+        $State.FilterTerms.Count | Should Be 0
         $Ui.List.Dispose()
     }
 }
 
 Describe 'Preview' {
+    BeforeEach { Reset-TestState }
+
     It 'describes a text entry: length, formatting, time copied' {
         $entry = New-FormattedEntry ('x' * 1234) -Rtf '{\rtf1 x}'
         $info = Get-PreviewInfo $entry
@@ -165,6 +173,21 @@ Describe 'Preview' {
         Get-PreviewInfo (New-ImageEntry -Width 40 -Height 20) | Should Match "^Image 40 $([char]0xD7) 20 .+ KB "
     }
 
+    It 'says whether the text in an image is still being read or was not found' {
+        $entry = New-ImageEntry
+        Get-PreviewInfo $entry | Should Not Match 'reading text'   # no OCR engine: no promise
+        $Ui.OcrEngine = 'stand-in'
+        Get-PreviewInfo $entry | Should Match 'reading text\.\.\.'
+        $entry.OcrText = ''
+        Get-PreviewInfo $entry | Should Match 'no text found'
+    }
+
+    It 'adds the date for entries copied before today' {
+        $entry = [PsClip.ClipEntry]::new('old')
+        $entry.Copied = [datetime]'2026-01-02 08:09'
+        Get-PreviewInfo $entry | Should Match 'copied 02\.01\. 08:09$'
+    }
+
     It 'shows the full text with Windows line breaks' {
         Get-PreviewText ([PsClip.ClipEntry]::new("one`ntwo`r`nthree")) | Should BeExactly "one`r`ntwo`r`nthree"
     }
@@ -172,8 +195,7 @@ Describe 'Preview' {
     It 'cuts very long texts and says how much is missing' {
         $script:MaxPreviewLength = 10
         $text = Get-PreviewText ([PsClip.ClipEntry]::new('x' * 25))
-        $text | Should Match ('^x{10}\r\n\.\.\.  \(15 more characters\)$')
-        $script:MaxPreviewLength = 100000
+        $text | Should Match ('^x{10}\r\n\.\.\.  \(15 more characters\)$')   # Reset-TestState restores the limit
     }
 }
 
@@ -459,7 +481,9 @@ Describe 'Filter words in the list (ListPainter.FindMatches)' {
     }
 
     It 'merges overlapping and touching matches into one range' {
-        Get-Ranges 'abcdef' @('abc', 'bcd', 'def') | Should BeExactly '0+6'
+        Get-Ranges 'abcdef' @('abc', 'bcd', 'def') | Should BeExactly '0+6'   # overlapping
+        Get-Ranges 'abcd' @('ab', 'cd') | Should BeExactly '0+4'               # touching
+        Get-Ranges 'ab cd' @('ab', 'cd') | Should BeExactly '0+2 3+2'          # apart
     }
 
     It 'finds nothing without words, and keeps at most the given number of ranges' {
@@ -469,18 +493,35 @@ Describe 'Filter words in the list (ListPainter.FindMatches)' {
 }
 
 Describe 'Window size (Reset-PopupSize)' {
-    It 'fits the configured number of rows between the filter box and the status line' {
+    BeforeEach {
         Reset-TestState
         $script:Ui.Scale = 1.0
         $script:Ui.SearchPanel = [pscustomobject]@{ Height = 40 }
         $script:Ui.Status = [pscustomobject]@{ Height = 25 }
         $script:Ui.List = [pscustomobject]@{ ItemHeight = 42 }
+        # The frame (title bar, borders) is 30 pixels high
         $script:Ui.Form = [pscustomobject]@{ Height = 330; ClientSize = [System.Drawing.Size]::new(300, 300) }
         $State.PreviewVisible = $false
-        Reset-PopupSize
-        $Ui.Form.ClientSize | Should Be ([System.Drawing.Size]::new(560, 40 + 10 * 42 + 25))   # M: 10 rows
-        $State.PopupSize = 'S'
-        Reset-PopupSize
-        $Ui.Form.ClientSize.Height | Should Be (40 + 6 * 42 + 25)
+    }
+
+    Context 'a screen tall enough' {
+        Mock Get-ScreenHeight { 2000 }   # not the real screen: it may be small
+
+        It 'fits the configured number of rows between the filter box and the status line' {
+            Reset-PopupSize
+            $Ui.Form.ClientSize | Should Be ([System.Drawing.Size]::new(560, 40 + 10 * 42 + 25))   # M: 10 rows
+            $State.PopupSize = 'S'
+            Reset-PopupSize
+            $Ui.Form.ClientSize.Height | Should Be (40 + 6 * 42 + 25)
+        }
+    }
+
+    Context 'a small screen' {
+        Mock Get-ScreenHeight { 400 }
+
+        It 'is never taller than the screen' {
+            Reset-PopupSize
+            $Ui.Form.ClientSize.Height | Should Be (400 - 30)
+        }
     }
 }
