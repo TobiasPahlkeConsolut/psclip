@@ -35,6 +35,9 @@
 .PARAMETER Size
     Written to settings.ini: popup size S, M (default) or L.
 
+.PARAMETER Font
+    Written to settings.ini: font of the popup, Segoe UI (default) or another installed font, e.g. Consolas.
+
 .PARAMETER OpenAt
     Written to settings.ini: where the hotkey opens the popup, Mouse or TextCursor (default here).
 
@@ -100,6 +103,10 @@ param(
     [Parameter(ParameterSetName = 'Install')]
     [ValidateSet('S', 'M', 'L')]
     [string]$Size,
+
+    [Parameter(ParameterSetName = 'Install')]
+    [ValidateNotNullOrEmpty()]
+    [string]$Font,
 
     [Parameter(ParameterSetName = 'Install')]
     [ValidateSet('Mouse', 'TextCursor')]

@@ -6,7 +6,7 @@
     Starts the clipboard manager in a background process and drives it with window messages
     and real keystrokes: clipboard capture, de-duplication, private content, popup, filter,
     pinning, pasting into another window, preview, popup size, the tray menu (window size, memory
-    limit, open at, hotkey dialog, dark mode, keep pinned entries, keep awake), the settings file
+    limit, font, open at, hotkey dialog, dark mode, keep pinned entries, keep awake), the settings file
     (read at start, saved by the tray menu, applied when saved, kept across a restart) and graceful
     shutdown.
 
@@ -95,10 +95,14 @@ function Get-TestSetting {
     # A setting's value as the test instance's settings file has it.
     param([string]$Name)
     try {
-        $lines = [IO.File]::ReadAllLines($settingsFile)
+        # Sharing everything, so that this read never keeps psclip from replacing the file (File.Replace).
+        $stream = [IO.File]::Open($settingsFile, 'Open', 'Read', 'ReadWrite, Delete')
+        $reader = [IO.StreamReader]::new($stream)
+        $lines = $reader.ReadToEnd() -split '\r?\n'
+        $reader.Dispose()
     }
     catch {
-        return $null   # psclip may be replacing it right now (File.Replace): the caller waits and asks again
+        return $null   # psclip may be replacing it right now: the caller waits and asks again
     }
     foreach ($line in $lines) {
         if ($line -match "^\s*$Name\s*=\s*(.*?)\s*$") { return $Matches[1] }
@@ -124,6 +128,9 @@ try {
     $popup = Find-ManagerWindow 'Clipboard history'
     $hotkeyTaken = -not (Test-HotkeyFree $testHotkey.Modifiers $testHotkey.VirtualKey)
     Add-Result "Hotkey $($testHotkey.Text) registered" $hotkeyTaken
+    # Not DPI-aware, Windows would stretch psclip's windows to the display scaling: blurry, wrong sizes.
+    $awareness = [TestNative]::DpiAwarenessOf($manager.Id)
+    Add-Result 'psclip is DPI-aware (sharp at any display scaling)' ($awareness -ge 1) "awareness $awareness"
     $fromFile = (Get-Content $log -Raw) -match "Settings from .*settings-$instanceName\.ini"
     Add-Result 'Theme, hotkey and keep-awake time come from the settings file' ($fromFile -and $hotkeyTaken)
 
@@ -522,9 +529,37 @@ try {
     $themeSaved = Wait-Until { (Get-TestSetting 'Theme') -eq $otherTheme }
     Add-Result 'The theme is saved to the settings file' $themeSaved "Theme = $(Get-TestSetting 'Theme')"
 
+    # --- tray menu: Font > the last one of the list (Fira Code, if installed): the rows follow its height ---
+    $fontLine = [regex]::Match('', 'x')   # no match yet
+    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 6 + $keyRight))) {   # 6x Down -> Font
+        Wait-Milliseconds 300
+        Save-MenuImages "tray-menu-font-$Theme"
+        if ((Send-MenuKeys $keyUp, $keyEnter) -and (Wait-Until { (Get-Content $log -Raw) -match 'Popup font: ' })) {
+            $fontLine = [regex]::Match((Get-Content $log -Raw), 'Popup font: (.+) \(row height (\d+) px\)\.')
+        }
+    }
+    $fontRowHeight = $fontRows = $fontItems = -1
+    if ($fontLine.Success -and (Show-TestPopup)) {
+        $listBox = [TestNative]::ChildByClass($popup, 'LISTBOX')   # in case the list got a new window
+        $searchBox = [TestNative]::EditBox($popup, $false)
+        $fontRowHeight = [TestNative]::ListItemHeight($listBox)
+        $fontRows = [TestNative]::VisibleListRows($listBox)
+        $fontItems = @([TestNative]::ListBoxItems($listBox)).Count
+        Wait-Milliseconds 400   # the first drawing in a new font takes a moment
+        Save-WindowImage $popup "popup-font-$Theme.png"
+        Hide-TestPopup
+    }
+    $fontName = $fontLine.Groups[1].Value
+    $fontSaved = $fontLine.Success -and (Wait-Until { (Get-TestSetting 'Font') -eq $fontName })
+    $fontApplied = $fontSaved -and $fontRowHeight -eq [int]('0' + $fontLine.Groups[2].Value) -and $fontRows -eq 6 -and
+        $fontItems -gt 3
+    Add-Result 'Tray menu: font - rows follow its height, saved to the settings file' $fontApplied `
+        ("font '$fontName', row height $fontRowHeight (logged $($fontLine.Groups[2].Value)), rows $fontRows, " +
+            "$fontItems entries")
+
     # --- tray menu: Memory limit > 1 GB ---
     $memoryChanged = $false
-    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 7 + $keyRight))) {   # 7x Down -> Memory limit
+    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 8 + $keyRight))) {   # 8x Down -> Memory limit
         Wait-Milliseconds 300
         Save-MenuImages "tray-menu-memory-$Theme"
         if (Send-MenuKeys $keyUp, $keyEnter) {   # Up wraps around to the last item, 1 GB
@@ -538,7 +573,7 @@ try {
     $caret = New-Object TestNative+Rect      # all zero until measured
     $popupRect = New-Object TestNative+Rect
     $accessibleCaret = [System.Drawing.Rectangle]::Empty
-    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 6 + $keyRight))) {   # 6x Down -> Open at
+    if ((Open-TrayMenu) -and (Send-MenuKeys (@($keyDown) * 7 + $keyRight))) {   # 7x Down -> Open at
         Wait-Milliseconds 300
         if (Send-MenuKeys $keyUp, $keyEnter) {   # Up wraps around to the last item, Text cursor
             $openAtChanged = Wait-Until { (Get-Content $log -Raw) -match 'Popup opens at: TextCursor' }
@@ -581,7 +616,7 @@ try {
     Add-Result 'The text cursor is found through accessibility too (browsers)' $sameCaret "$accessibleCaret"
 
     # --- tray menu: Keep pinned entries (the test instance's own file; the entry pinned above) ---
-    $keepPinnedItem = @($keyDown) * 8 + $keyEnter   # 8x Down -> Keep pinned entries
+    $keepPinnedItem = @($keyDown) * 9 + $keyEnter   # 9x Down -> Keep pinned entries
     $pinnedSaved = $pinnedDeleted = $false
     if ((Open-TrayMenu) -and (Send-MenuKeys $keepPinnedItem)) {
         $pinnedSaved = Wait-Until {
@@ -595,7 +630,7 @@ try {
     Add-Result 'Switched off, the saved file is deleted' $pinnedDeleted
 
     # --- tray menu: Keep awake (presses F15 after $keepAwakeSeconds s without input) ---
-    $keepAwakeItem = @($keyDown) * 9 + $keyEnter   # 9x Down -> Keep awake
+    $keepAwakeItem = @($keyDown) * 10 + $keyEnter   # 10x Down -> Keep awake
     $idleOn = $idleOff = -1
     if ((Open-TrayMenu) -and (Send-MenuKeys $keepAwakeItem)) {
         $idleOn = Measure-MaxIdle 6000

@@ -74,8 +74,19 @@ namespace PsClipTest
         // Holds a file open without sharing for a while, released by another thread - like a virus scanner.
         public static void HoldFor(string path, int milliseconds)
         {
+            Hold(path, milliseconds, System.IO.FileShare.None);
+        }
+
+        // Reads it for a while, letting others read too - like an editor or indexer: File.Replace cannot remove it.
+        public static void HoldReadFor(string path, int milliseconds)
+        {
+            Hold(path, milliseconds, System.IO.FileShare.Read);
+        }
+
+        static void Hold(string path, int milliseconds, System.IO.FileShare share)
+        {
             System.IO.FileStream stream = System.IO.File.Open(path, System.IO.FileMode.Open,
-                System.IO.FileAccess.Read, System.IO.FileShare.None);
+                System.IO.FileAccess.Read, share);
             System.Threading.Thread thread = new System.Threading.Thread(delegate ()
             {
                 System.Threading.Thread.Sleep(milliseconds);
@@ -123,6 +134,7 @@ function Reset-TestState {
         HotkeyActive        = $true
         ThemeSetting        = 'Dark'
         PopupSize           = 'M'
+        FontName            = 'Segoe UI'
         OpenAt              = 'Mouse'
         PreviewVisible      = $false
         PreviewDefault      = $false

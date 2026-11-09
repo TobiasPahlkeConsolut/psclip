@@ -28,6 +28,7 @@ function Get-ParameterSettings {
         MaxEntryLength   = $MaxEntryLength
         Theme            = $Theme
         Size             = $Size
+        Font             = $Font
         OpenAt           = $OpenAt
         Preview          = [bool]$Preview
         KeepAwake        = [bool]$KeepAwake
@@ -60,6 +61,7 @@ function Get-CurrentSettings {
         Hotkey           = Format-HotkeySetting $State.HotkeySpec
         Theme            = $State.ThemeSetting
         Size             = $State.PopupSize
+        Font             = $State.FontName
         OpenAt           = $State.OpenAt
         MaxMemory        = $State.MemoryLimit
         KeepPinned       = [bool]$State.KeepPinned
@@ -95,6 +97,11 @@ function ConvertFrom-SettingText {
     if ($type -eq 'Hotkey') {
         return Format-HotkeySetting (ConvertFrom-HotkeyText $Text)   # with the reason when it is not valid
     }
+    if ($type -eq 'Font') {
+        $installed = Get-InstalledFontName $Text
+        if ($installed) { return $installed }
+        throw "Font '$Text' is not installed."
+    }
     if ($type -eq 'Choice') {
         $choice = @($definition.Choices) -eq $Text.Trim()   # -eq ignores case
         if ($choice.Count -gt 0) { return [string]$choice[0] }
@@ -112,6 +119,23 @@ function ConvertFrom-SettingText {
         [Globalization.CultureInfo]::InvariantCulture, [ref]$number)
     if ($parsed -and $number -ge $definition.Minimum -and $number -le $definition.Maximum) { return $number }
     throw "$Name '$Text' is not valid - use a whole number from $($definition.Minimum) to $($definition.Maximum)."
+}
+
+function Get-InstalledFontName {
+    # The name of an installed font family as Windows writes it ('consolas' -> 'Consolas'), or $null. Fonts installed
+    # for the user only count too.
+    param([string]$Name)
+
+    $fonts = [System.Drawing.Text.InstalledFontCollection]::new()
+    try {
+        foreach ($family in $fonts.Families) {
+            if ($family.Name -eq $Name.Trim()) { return $family.Name }
+        }
+    }
+    finally {
+        $fonts.Dispose()
+    }
+    $null
 }
 
 function ConvertTo-SettingText {
@@ -295,6 +319,7 @@ function Set-Setting {
             Set-Theme (Test-DarkTheme)
         }
         'Size' { $State.PopupSize = $Value }   # the popup opens at this size next time
+        'Font' { Set-PopupFont $Value }
         'OpenAt' { $State.OpenAt = $Value }
         'MaxMemory' { Set-MemoryLimit $Value }
         'KeepPinned' { Set-KeepPinned $Value }

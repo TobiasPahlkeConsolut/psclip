@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 - 2026-11-09
 
 - **Settings file**: `settings.ini` next to psclip keeps the settings - easy to read and to edit with any text editor
   (*Edit settings file...* in the tray menu). The tray menu saves its changes to it, and changes saved in the file
@@ -8,6 +8,10 @@
 - `Install.ps1` writes the settings to `settings.ini` instead of into the shortcuts. Updating from an older version, it
   moves the settings from the old shortcut into the file; an existing file keeps its settings, except those you give
   `Install.ps1`
+- **Font** in the tray menu: Segoe UI, Calibri, Verdana, Consolas, Cascadia Mono or Fira Code - each shown in its own
+  font, only those installed. The settings file takes any installed font (`Font = ...`, also `-Font`)
+- Saving the pinned entries or the settings no longer fails when another program opens the file just while psclip
+  replaces it: psclip tries again briefly, as for a virus scanner
 
 ## 1.1.2 - 2026-11-09
 

@@ -50,9 +50,10 @@ namespace PsClip
             RetryWhileInUse(delegate { File.Move(path, newPath); });
         }
 
-        // A virus scanner or backup program may hold the file for a moment - typically right after it was written,
-        // so the next write fails now and then. Such a sharing violation is tried again a few times (at most about
-        // 0.4 s) before it counts; any other error counts at once.
+        // A virus scanner, backup program or editor may hold the file for a moment - typically right after it was
+        // written, so the next write fails now and then. That is tried again a few times (at most about 0.4 s) before
+        // it counts; any other error counts at once. Each attempt writes the temporary file anew, so it also recovers
+        // from a File.Replace that got halfway (the old file then no longer exists, and the new one is moved).
         static void RetryWhileInUse(Action action)
         {
             for (int attempt = 1; ; attempt++)
@@ -64,11 +65,25 @@ namespace PsClip
                 }
                 catch (IOException e)
                 {
-                    int code = e.HResult & 0xFFFF;
-                    bool inUse = code == 32 || code == 33;   // ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
-                    if (!inUse || attempt >= InUseAttempts) throw;
+                    if (!IsInUse(e) || attempt >= InUseAttempts) throw;
                 }
                 System.Threading.Thread.Sleep(40 * attempt);
+            }
+        }
+
+        // Errors that mean "another program has the file open right now".
+        public static bool IsInUse(IOException e)
+        {
+            switch (e.HResult & 0xFFFF)
+            {
+                case 32:     // ERROR_SHARING_VIOLATION
+                case 33:     // ERROR_LOCK_VIOLATION
+                case 1175:   // ERROR_UNABLE_TO_REMOVE_REPLACED - File.Replace: someone opened the old file meanwhile
+                case 1176:   // ERROR_UNABLE_TO_MOVE_REPLACEMENT
+                case 1177:   // ERROR_UNABLE_TO_MOVE_REPLACEMENT_2
+                    return true;
+                default:
+                    return false;
             }
         }
 

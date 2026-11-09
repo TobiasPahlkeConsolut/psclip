@@ -11,7 +11,8 @@ function Initialize-Ui {
         Justification = 'SetCompatibleTextRenderingDefault fails harmlessly after the first window')]
     param()
 
-    [void][PsClip.Native]::SetProcessDPIAware()
+    # DPI awareness is set at the start of Main: anything that starts GDI+ before (listing the installed fonts
+    # does) fixes the process at 100 %, and Windows then stretches the blurry popup to the display scaling.
     [Application]::EnableVisualStyles()
     try {
         [Application]::SetCompatibleTextRenderingDefault($false)
@@ -33,8 +34,7 @@ function Initialize-UiMetrics {
     $Ui.Scale = $graphics.DpiX / 96.0
     $graphics.Dispose()
 
-    $Ui.Font = [Font]::new('Segoe UI', 10)
-    $Ui.SmallFont = [Font]::new('Segoe UI', 8.5)
+    Set-UiFonts $State.FontName
     $Ui.PinFont = [Font]::new('Segoe MDL2 Assets', 9)
     $Ui.PinGlyph = [string][char]0xE718
     if ($Ui.PinFont.Name -ne 'Segoe MDL2 Assets') {
@@ -46,6 +46,50 @@ function Initialize-UiMetrics {
     $Ui.PinColumn = [int](22 * $Ui.Scale)
     $Ui.TextIndent = $Ui.NumberColumn + $Ui.PinColumn   # entry text, filter text and preview start here
     $Ui.Padding = [int](8 * $Ui.Scale)
+}
+
+function Set-UiFonts {
+    # The fonts of the popup and the dialogs in this family: the text, and a smaller one for the status line. Segoe UI
+    # if it is not installed (any more) - Windows would silently take another font.
+    param([string]$Name)
+
+    $font = [Font]::new($Name, 10)
+    if ($font.Name -ne $Name) {
+        $font.Dispose()
+        $font = [Font]::new('Segoe UI', 10)
+    }
+    $Ui.Font = $font
+    $Ui.SmallFont = [Font]::new($font.FontFamily, 8.5)
+}
+
+function Set-FontLayout {
+    # Gives the popup's controls the fonts and the sizes that follow from them - when the popup is built, and when the
+    # font changes (Set-PopupFont).
+    $Ui.Form.Font = $Ui.Font   # the filter box, the list and the preview text use the form's font
+    $Ui.SearchPanel.Height = $Ui.Search.PreferredHeight + 2 * $Ui.Padding
+    $Ui.List.ItemHeight = 2 * $Ui.Font.Height + [int](6 * $Ui.Scale)   # two lines per entry (ListPainter)
+    $Ui.PreviewSplitter.MinExtra = $Ui.List.ItemHeight * 2             # the list keeps at least two rows
+    $Ui.Status.Font = $Ui.SmallFont
+    $Ui.Status.Height = [int]($Ui.SmallFont.Height * 1.8)
+    $Ui.PreviewInfo.Font = $Ui.SmallFont
+    $Ui.PreviewInfo.Height = [int]($Ui.SmallFont.Height * 1.7)
+}
+
+function Set-PopupFont {
+    # Tray menu "Font" and the settings file: the popup's text in another font, from its next opening on. The rows
+    # follow the font's height; images keep their thumbnails.
+    param([string]$Name)
+
+    $previous = $Ui.Font, $Ui.SmallFont
+    $State.FontName = $Name
+    Set-UiFonts $Name
+    Set-FontLayout
+    if ($null -ne $State.IsDark) {
+        # A new row height may give the list a new window - without its dark scroll bar.
+        [PsClip.Native]::SetDarkControlTheme($Ui.List.Handle, $State.IsDark)
+    }
+    foreach ($font in $previous) { $font.Dispose() }   # no control uses them any more
+    Write-Verbose "Popup font: $($Ui.Font.Name) (row height $($Ui.List.ItemHeight) px)."
 }
 
 function Initialize-ControlHandles {
@@ -72,7 +116,6 @@ function New-PopupWindow {
     $form.TopMost = $true
     $form.KeyPreview = $true
     $form.AutoScaleMode = 'None'
-    $form.Font = $Ui.Font
     $form.MinimumSize = [Size]::new([int](300 * $scale), [int](200 * $scale))
 
     $search = [TextBox]::new()
@@ -82,7 +125,6 @@ function New-PopupWindow {
     $searchPanel = [Panel]::new()
     $searchPanel.Dock = 'Top'
     $searchPanel.Padding = [Padding]::new($Ui.TextIndent, $Ui.Padding, $Ui.Padding, $Ui.Padding)
-    $searchPanel.Height = $search.PreferredHeight + 2 * $Ui.Padding
     $searchPanel.Controls.Add($search)
 
     $list = [ListBox]::new()
@@ -90,15 +132,11 @@ function New-PopupWindow {
     $list.IntegralHeight = $false
     $list.BorderStyle = 'None'
     $list.DrawMode = 'OwnerDrawFixed'
-    $list.ItemHeight = 2 * $Ui.Font.Height + [int](6 * $scale)   # two lines per entry (ListPainter)
-    $Ui.ThumbnailHeight = $list.ItemHeight - [int](6 * $scale)
     $list.ContextMenuStrip = New-ListMenu
 
     $status = [Label]::new()
     $status.Dock = 'Bottom'
     $status.AutoSize = $false
-    $status.Font = $Ui.SmallFont
-    $status.Height = [int]($Ui.SmallFont.Height * 1.8)
     $status.TextAlign = 'MiddleLeft'
     $status.Padding = [Padding]::new([int](4 * $scale), 0, 0, 0)
 
@@ -112,8 +150,6 @@ function New-PopupWindow {
     $previewInfo = [Label]::new()
     $previewInfo.Dock = 'Top'
     $previewInfo.AutoSize = $false
-    $previewInfo.Font = $Ui.SmallFont
-    $previewInfo.Height = [int]($Ui.SmallFont.Height * 1.7)
     $previewInfo.TextAlign = 'MiddleLeft'
 
     # Text can be selected and copied (Ctrl+C, context menu), e.g. a part of the text recognized in an image.
@@ -149,7 +185,6 @@ function New-PopupWindow {
     $previewSplitter.Dock = 'Bottom'
     $previewSplitter.Height = [int](5 * $scale)
     $previewSplitter.MinSize = [int](60 * $scale)         # smallest preview
-    $previewSplitter.MinExtra = $list.ItemHeight * 2      # the list keeps at least two rows
     $previewSplitter.Text = 'Preview size'
     $previewSplitter.Visible = $State.PreviewVisible
 
@@ -179,6 +214,9 @@ function New-PopupWindow {
     $Ui.PreviewImage = $previewImage
     $Ui.PreviewSplitter = $previewSplitter
     $Ui.PreviewTextSplitter = $previewTextSplitter
+    Set-FontLayout
+    # Thumbnails fit the rows of the font psclip started with; a font changed later does not redraw them.
+    $Ui.ThumbnailHeight = $list.ItemHeight - [int](6 * $scale)
     Reset-PopupSize
 
     [void]$form.Handle   # create the window now so that BeginInvoke works before the first Show
@@ -417,6 +455,12 @@ function New-TrayIcon {
     }
     [void]$menu.Items.Add($Ui.SizeMenuItem)
 
+    $Ui.FontMenuItem = [ToolStripMenuItem]::new('Font')
+    foreach ($name in $FontChoices) {
+        if (Get-InstalledFontName $name) { Add-FontMenuItem $name }
+    }
+    [void]$menu.Items.Add($Ui.FontMenuItem)
+
     $Ui.OpenAtMenuItem = [ToolStripMenuItem]::new('Open at')
     $openAtOptions = @{ Tag = 'Mouse'; Text = 'Mouse pointer'; Tip = $null },
         @{ Tag = 'TextCursor'; Text = 'Text cursor'; Tip = 'Below the text cursor, if the program reports it' }
@@ -480,12 +524,32 @@ function New-TrayIcon {
     $Ui.Tray = $tray
 }
 
+function Add-FontMenuItem {
+    # An entry of the tray menu's "Font" list, shown in its own font.
+    param([string]$Name)
+
+    $item = $Ui.FontMenuItem.DropDownItems.Add($Name)
+    $item.Tag = $Name
+    $item.Font = [Font]::new($Name, [SystemFonts]::MenuFont.SizeInPoints)
+    $item.add_Click({
+        param($source, $e)
+        Set-PopupFont $source.Tag
+        Save-Setting 'Font'
+    })
+}
+
 function Update-TrayMenu {
     # Before the tray menu opens: current theme and check marks.
     Set-Theme (Test-DarkTheme)
     $Ui.DarkModeMenuItem.Checked = $State.IsDark
     foreach ($item in $Ui.SizeMenuItem.DropDownItems) {
         $item.Checked = $item.Tag -eq $State.PopupSize
+    }
+    if (@($Ui.FontMenuItem.DropDownItems | ForEach-Object { $_.Tag }) -notcontains $State.FontName) {
+        Add-FontMenuItem $State.FontName   # another font, from -Font or the settings file
+    }
+    foreach ($item in $Ui.FontMenuItem.DropDownItems) {
+        $item.Checked = $item.Tag -eq $State.FontName
     }
     foreach ($item in $Ui.OpenAtMenuItem.DropDownItems) {
         $item.Checked = $item.Tag -eq $State.OpenAt

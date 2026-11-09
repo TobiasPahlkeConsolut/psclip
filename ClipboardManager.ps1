@@ -31,14 +31,14 @@
     (also the text recognized in an image); drag the bar on its top edge to make it bigger, or
     the bar between an image and its text. Sizes and F3 are reset when the popup opens again.
     Left-click the tray icon to open the history in copy-only mode; right-click it for "Clear
-    history", the settings (hotkey, dark mode, window size, where the popup opens, memory limit,
-    keeping pinned entries, keep awake), "Edit settings file..." and "Exit". Settings changed there
+    history", the settings (hotkey, dark mode, window size, font, where the popup opens, memory
+    limit, keeping pinned entries, keep awake), "Edit settings file..." and "Exit". Settings changed there
     last until the script exits - unless there is a settings file.
 
     Settings file: when settings.ini exists next to this script (Install.ps1 creates it, and so does
     "Edit settings file..."), psclip reads its settings from it and saves the tray menu's changes to
     it; saving it in an editor applies the changes at once. It holds a line "Name = value" for each
-    of the parameters Hotkey, Theme, Size, OpenAt, MaxMemory, KeepPinned, Preview, KeepAwake,
+    of the parameters Hotkey, Theme, Size, Font, OpenAt, MaxMemory, KeepPinned, Preview, KeepAwake,
     KeepAwakeSeconds and MaxEntryLength, e.g. "Theme = Light" or "KeepAwake = true". Parameters
     given on the command line win over the file.
 
@@ -78,6 +78,10 @@
     allows). The popup opens at this size every time; resizing it by hand lasts until it closes.
     "Window size" in the tray menu changes it.
 
+.PARAMETER Font
+    Font of the popup's text: Segoe UI (default) or any other installed font, e.g. Consolas or
+    Cascadia Mono. "Font" in the tray menu offers a few.
+
 .PARAMETER OpenAt
     Where the hotkey opens the popup: Mouse (default, at the mouse pointer) or TextCursor (below
     the text cursor of the window you are typing in; at the mouse pointer when that program does
@@ -116,7 +120,7 @@
     Runs in the current console and logs what happens (never the clipboard content itself).
 
 .NOTES
-    psclip 1.1.2 - https://github.com/TobiasPahlkeConsolut/psclip
+    psclip 1.2.0 - https://github.com/TobiasPahlkeConsolut/psclip
 
     Stop it via the tray menu (Exit). Other programs can stop it gracefully by posting WM_CLOSE
     to its hidden window titled 'PsClipboardManager' (the InstanceName).
@@ -145,6 +149,9 @@ param(
 
     [ValidateSet('S', 'M', 'L')]
     [string]$Size = 'M',
+
+    [ValidateNotNullOrEmpty()]
+    [string]$Font = 'Segoe UI',
 
     [ValidateSet('Mouse', 'TextCursor')]
     [string]$OpenAt = 'Mouse',
@@ -193,7 +200,7 @@ if (-not ('PsClip.Native' -as [type])) {
 #region Settings
 
 # Also in .NOTES above and CHANGELOG.md (tests\Release.Tests.ps1 checks that they match)
-$PsClipVersion = '1.1.2'
+$PsClipVersion = '1.2.0'
 
 $Palettes = @{
     Dark  = @{
@@ -234,6 +241,10 @@ $PopupSizes = @{
     L = @{ Width = 620; Rows = 15 }
 }
 
+# The fonts the tray menu offers - as far as they are installed (-Font and the settings file take any installed font):
+# Windows' own, plus Fira Code, a popular programming font
+$FontChoices = 'Segoe UI', 'Calibri', 'Verdana', 'Consolas', 'Cascadia Mono', 'Fira Code'
+
 # Height of the preview (F3) at 100 % display scaling; the popup grows by it
 $PreviewHeight = 220
 $PreviewTextShare = 0.3      # part of the preview for the text recognized in an image (below the image)
@@ -271,6 +282,10 @@ $SettingDefinitions = [ordered]@{
         Type    = 'Choice'
         Choices = 'S', 'M', 'L'
         Comment = 'Size of the popup: S, M or L (6, 10 or 15 entries)'
+    }
+    Font             = @{
+        Type    = 'Font'
+        Comment = 'Font of the popup: any installed font, e.g. Segoe UI, Calibri, Consolas or Cascadia Mono'
     }
     OpenAt           = @{
         Type    = 'Choice'
@@ -336,6 +351,9 @@ $PinTextFlags = [TextFormatFlags]'HorizontalCenter, VerticalCenter, SingleLine, 
 # Dot-sourced (". .\ClipboardManager.ps1", used by the unit tests): only load the functions.
 if ($MyInvocation.InvocationName -eq '.') { return }
 
+# First of all: once GDI+ runs (e.g. listing the installed fonts to check -Font), the process can no longer become
+# DPI-aware, and Windows stretches its windows to the display scaling - blurry and at the wrong size.
+[void][PsClip.Native]::SetProcessDPIAware()
 Write-Verbose "psclip $PsClipVersion"
 if ($PSBoundParameters.ContainsKey('MaxItems') -or $PSBoundParameters.ContainsKey('MaxImages')) {
     Write-Verbose '-MaxItems and -MaxImages are ignored: the history is limited by -MaxMemory now.'
@@ -390,6 +408,7 @@ $State = @{
     HotkeyActive         = $false
     ThemeSetting         = $startSettings.Theme  # Dark, Light or Auto; the tray menu switches it
     PopupSize            = $startSettings.Size   # S, M or L; the tray menu changes it
+    FontName             = $startSettings.Font   # font family of the popup's text; the tray menu changes it
     OpenAt               = $startSettings.OpenAt # Mouse or TextCursor; the tray menu changes it
     PreviewVisible       = $startSettings.Preview   # F3 switches it while the popup is open
     PreviewDefault       = $startSettings.Preview   # how the popup opens

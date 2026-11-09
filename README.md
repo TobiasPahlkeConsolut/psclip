@@ -18,8 +18,8 @@ in a text file.
 - **Finds text in screenshots**: Windows' built-in OCR recognizes it in the background, offline
 - **Easy to read**: two lines per entry, shaded rows, the filter's words highlighted, numbered rows for `Alt+1` ...
 - **Preview** (`F3`), **edit** (`F2`) and **pin** (`Ctrl+P`) entries - pinned entries can survive restarts
-- Dark or light, three sizes; settings in the tray menu and in a simple text file (`settings.ini`); skips what
-  password managers mark as private
+- Dark or light, three sizes, a choice of fonts; settings in the tray menu and in a simple text file
+  (`settings.ini`); skips what password managers mark as private
 - **Keep awake** (optional, unrelated to the clipboard): keeps the session from going idle
 
 ## Install
@@ -29,7 +29,7 @@ Needs Windows 10 or 11 with Windows PowerShell 5.1, which comes with Windows. Do
 folder:
 
 ```powershell
-Expand-Archive .\psclip-1.1.2.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
+Expand-Archive .\psclip-1.2.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
 cd $env:LOCALAPPDATA\tools\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```

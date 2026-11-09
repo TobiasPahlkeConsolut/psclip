@@ -120,6 +120,40 @@ Describe 'Popup window and tray menu, built hidden (never shown)' {
         [object]::ReferenceEquals((Get-SelectedEntry), $entry) | Should Be $true
     }
 
+    It 'offers the installed fonts in the tray menu, each in its own font, Segoe UI first' {
+        $names = @($Ui.FontMenuItem.DropDownItems | ForEach-Object { $_.Tag })
+        $names[0] | Should BeExactly 'Segoe UI'
+        $names -contains 'Consolas' | Should Be $true   # comes with Windows
+        @($names | Where-Object { $FontChoices -notcontains $_ }).Count | Should Be 0
+        $Ui.FontMenuItem.DropDownItems[1].Font.Name | Should BeExactly $names[1]
+        Update-TrayMenu
+        @($Ui.FontMenuItem.DropDownItems | Where-Object { $_.Checked } | ForEach-Object { $_.Tag }) -join ',' |
+            Should BeExactly 'Segoe UI'
+    }
+
+    It 'changes the font of the popup, and the row height with it' {
+        Mock Save-Setting {}
+        Set-PopupFont 'Courier New'
+        $State.FontName | Should BeExactly 'Courier New'
+        $Ui.Font.Name | Should BeExactly 'Courier New'
+        $Ui.List.Font.Name | Should BeExactly 'Courier New'
+        $Ui.Status.Font.Name | Should BeExactly 'Courier New'
+        $Ui.List.ItemHeight | Should Be (2 * $Ui.Font.Height + [int](6 * $Ui.Scale))
+        Update-TrayMenu   # a font that is not in the list gets an entry of its own
+        @($Ui.FontMenuItem.DropDownItems | Where-Object { $_.Checked } | ForEach-Object { $_.Tag }) -join ',' |
+            Should BeExactly 'Courier New'
+        Update-PopupList
+        $Ui.List.Items.Count | Should BeGreaterThan 0
+        Set-PopupFont 'Segoe UI'
+        $Ui.List.Font.Name | Should BeExactly 'Segoe UI'
+    }
+
+    It 'takes Segoe UI for a font that is not installed' {
+        Set-UiFonts 'No Such Font psclip'
+        $Ui.Font.Name | Should BeExactly 'Segoe UI'
+        $Ui.SmallFont.Name | Should BeExactly 'Segoe UI'
+    }
+
     Context 'copy mode (opened from the tray icon)' {
         Mock Set-ClipboardEntry {}
 

@@ -61,6 +61,8 @@ The tray icon is a small blue clipboard, possibly in the `^` overflow area of th
   - *Change hotkey* - press the new combination
   - *Dark mode* - on / off
   - *Window size* - Small, Medium, Large
+  - *Font* - Segoe UI, Calibri, Verdana, Consolas, Cascadia Mono, Fira Code (those installed, each shown in its own
+    font); `settings.ini` takes any other installed font
   - *Open at* - Mouse pointer, Text cursor
   - *Memory limit* - 100 MB, 500 MB, 1 GB; shows how much the history uses. A lower limit drops the oldest
     entries right away

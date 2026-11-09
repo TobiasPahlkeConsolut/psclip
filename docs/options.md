@@ -15,6 +15,7 @@ defaults** for a new `settings.ini`: `MaxMemory = 500MB`, `OpenAt = TextCursor` 
 | `Hotkey`            | `Ctrl+Ö` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
 | `Theme`             | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                    |
 | `Size`              | `M`      | Popup size `S`, `M` or `L`: 6, 10 or 15 entries (two lines each), as far as the screen allows |
+| `Font`              | `Segoe UI` | Font of the popup's text - any installed font. The tray menu offers Segoe UI, Calibri, Verdana, Consolas, Cascadia Mono and Fira Code, those that are installed |
 | `OpenAt`            | `Mouse`  | Where the hotkey opens the popup: `Mouse` (pointer) or `TextCursor`         |
 | `MaxMemory`         | `100MB`  | Memory the history may use: `100MB`, `500MB` or `1GB` (pinned entries count, but are never dropped) |
 | `KeepPinned`        | off      | *Keep pinned entries*: pinned entries survive restarts, encrypted (see [Keeping pinned entries](usage.md#keeping-pinned-entries)) |

@@ -210,6 +210,14 @@ features, quick install, key table, links.
   a history entry with the same text and saves pinned entries. Set .NET string fields to `[NullString]::Value`,
   not `$null` (which becomes `''` - `HasFormatting` would stay true). The form is disposed: no text stays in a
   hidden window.
+- Fonts (`-Font`, `$State.FontName`, tray menu *Font* from `$FontChoices`, those installed): `Set-UiFonts` makes
+  `$Ui.Font` / `$Ui.SmallFont` (Segoe UI if the family is missing - GDI+ would silently substitute another one),
+  `Set-FontLayout` gives the controls the fonts and the sizes that follow (row height, filter box, status line), for
+  `New-PopupWindow` and for `Set-PopupFont` at runtime. Thumbnails keep the size of the start font.
+  `ConvertFrom-SettingText` checks fonts with `InstalledFontCollection` (per-user fonts included).
+- **DPI awareness is set first in Main** (`SetProcessDPIAware`): anything that starts GDI+ before it - listing the
+  installed fonts to check `-Font` does - fixes the process at 100 %, and Windows then stretches the popup, blurry and
+  at the wrong size. `Settings.Tests.ps1` checks the order; the end-to-end test checks the process's awareness.
 - `Hide-Popup` empties the list and the preview: hidden controls can still be read by other programs
   (`LB_GETTEXT`, `WM_GETTEXT`), so no history content stays in them while the popup is closed.
 - `Update-StatusText` drops the last key hints until the line fits the popup's width.

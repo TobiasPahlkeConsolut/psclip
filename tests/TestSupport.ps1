@@ -285,6 +285,24 @@ public static class TestNative
     }
 
     // Rows a list box shows completely: its client height in rows (LB_GETITEMHEIGHT)
+    [DllImport("shcore.dll")]
+    static extern int GetProcessDpiAwareness(IntPtr process, out int awareness);
+
+    // 0 = not DPI-aware (Windows stretches its windows), 1 = system aware, 2 = per monitor; -1 = unknown
+    public static int DpiAwarenessOf(int processId)
+    {
+        using (System.Diagnostics.Process process = System.Diagnostics.Process.GetProcessById(processId))
+        {
+            int awareness;
+            return GetProcessDpiAwareness(process.Handle, out awareness) == 0 ? awareness : -1;
+        }
+    }
+
+    public static int ListItemHeight(IntPtr listBox)
+    {
+        return (int)SendMessage(listBox, 0x01A1, IntPtr.Zero, IntPtr.Zero);   // LB_GETITEMHEIGHT
+    }
+
     public static int VisibleListRows(IntPtr listBox)
     {
         int rowHeight = (int)SendMessage(listBox, 0x01A1, IntPtr.Zero, IntPtr.Zero);

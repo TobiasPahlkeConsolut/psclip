@@ -159,7 +159,7 @@ Describe 'Write-InstallSettings' {
     $oldShortcut = '--headless powershell.exe -File "C:\psclip\ClipboardManager.ps1" -Theme Light -KeepAwake'
 
     It 'writes a new file with every setting: the installer defaults and the given ones' {
-        $values = Write-InstallSettings -Path $path -Given @{ Size = 'L'; KeepAwake = [switch]$true }
+        $values = Write-InstallSettings -Path $path -Given @{ Size = 'L'; KeepAwake = [switch]$true; Font = 'consolas' }
         $values.Count | Should Be $SettingDefinitions.Count
         $values.MaxMemory | Should BeExactly '500MB'
         $values.OpenAt | Should BeExactly 'TextCursor'
@@ -168,6 +168,7 @@ Describe 'Write-InstallSettings' {
         $values.KeepAwake | Should Be $true
         $values.Theme | Should BeExactly 'Dark'
         $values.Hotkey | Should BeExactly 'Ctrl+Oemtilde'
+        $values.Font | Should BeExactly 'Consolas'
         (Read-SettingsFile $path).Problems.Count | Should Be 0
         [IO.File]::ReadAllText($path) | Should Match "(?m)^# Keep pinned entries"
     }

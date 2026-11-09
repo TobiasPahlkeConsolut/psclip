@@ -26,6 +26,16 @@ function Set-TestSettingsFile {
     $path
 }
 
+Describe 'Startup order' {
+    It 'makes psclip DPI-aware before reading the settings - checking a font starts GDI+, which would prevent it' {
+        $script = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '..\ClipboardManager.ps1'))
+        $main = $script.Substring($script.IndexOf('#region Main'))
+        $aware = $main.IndexOf('SetProcessDPIAware()')
+        $aware | Should BeGreaterThan 0
+        $aware | Should BeLessThan $main.IndexOf('Get-StartSettings')
+    }
+}
+
 Describe 'Get-SettingsFilePath' {
     It 'is settings.ini next to the script, and a file of its own for another instance' {
         Get-SettingsFilePath 'C:\psclip' 'PsClipboardManager' | Should BeExactly 'C:\psclip\settings.ini'
@@ -79,6 +89,12 @@ Describe 'ConvertFrom-SettingText' {
             ConvertFrom-SettingText 'Preview' $text | Should Be $true
         }
         foreach ($text in 'false', 'NO', 'off', '0') { ConvertFrom-SettingText 'Preview' $text | Should Be $false }
+    }
+
+    It 'takes any installed font, written as Windows writes it' {
+        ConvertFrom-SettingText 'Font' 'consolas' | Should BeExactly 'Consolas'
+        ConvertFrom-SettingText 'Font' ' Segoe UI ' | Should BeExactly 'Segoe UI'
+        { ConvertFrom-SettingText 'Font' 'No Such Font psclip' } | Should Throw 'is not installed.'
     }
 
     It 'reads numbers' {
@@ -239,6 +255,22 @@ Describe 'Save-Setting' {
         [IO.File]::ReadAllText($path) | Should BeExactly $expected
     }
 
+    It 'counts the errors of a file another program has open as "in use" - and tries again for them' {
+        foreach ($code in 32, 33, 1175, 1176, 1177) {
+            [PsClip.SafeFile]::IsInUse([IO.IOException]::new('in use', 0x80070000 -bor $code)) | Should Be $true
+        }
+        [PsClip.SafeFile]::IsInUse([IO.IOException]::new('disk full', 0x80070070)) | Should Be $false
+    }
+
+    It 'tries again while another program reads the file' {
+        $path = Set-TestSettingsFile 'Size = M'
+        [PsClipTest.FileLock]::HoldReadFor($path, 150)
+        $State.PopupSize = 'L'
+        Save-Setting 'Size'
+        Assert-MockCalled Show-TrayWarning -Times 0 -Exactly -Scope It
+        [IO.File]::ReadAllText($path) | Should BeExactly "Size = L`r`n"
+    }
+
     It 'says once that a setting given on the command line wins at the next start' {
         $null = Set-TestSettingsFile 'Size = M'
         $State.SettingsGiven = [string[]]@('Size', 'Theme')
@@ -385,6 +417,17 @@ Describe 'Set-Setting' {
         $State.HotkeyText | Should BeExactly 'Ctrl+Shift+V'
         Assert-MockCalled Show-TrayWarning -Times 1 -Exactly -Scope It -ParameterFilter {
             $Text -like 'The hotkey Ctrl+Alt+F12 from *settings.ini is used by another program.'
+        }
+    }
+
+    Context 'a font from the file' {
+        Mock Set-PopupFont { $State.FontName = $Name }
+
+        It 'changes the font of the popup' {
+            Set-Setting 'Font' 'Consolas'
+            Assert-MockCalled Set-PopupFont -Times 1 -Exactly -Scope It -ParameterFilter { $Name -eq 'Consolas' }
+            Set-Setting 'Font' 'Consolas'
+            Assert-MockCalled Set-PopupFont -Times 1 -Exactly -Scope It
         }
     }
 

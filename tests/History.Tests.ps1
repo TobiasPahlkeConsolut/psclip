@@ -800,7 +800,17 @@ Describe 'Saved pinned entries (-KeepPinned)' {
     It 'leaves a file that is only in use alone: off at startup, stays off when switched on, loads it later' {
         Add-Entries 'saved'
         Switch-ClipboardPin (Get-Entry 'saved')
-        $lock = [System.IO.File]::Open($State.PinnedFile, 'Open', 'ReadWrite', 'None')   # like a backup program
+        # Like a backup program. Retried: a virus scanner may still read the file psclip has just written.
+        $lock = $null
+        for ($attempt = 1; $null -eq $lock; $attempt++) {
+            try {
+                $lock = [System.IO.File]::Open($State.PinnedFile, 'Open', 'ReadWrite', 'None')
+            }
+            catch {
+                if ($attempt -ge 20) { throw }
+                Start-Sleep -Milliseconds 50
+            }
+        }
         try {
             Restart-WithSavedPins | Should Match "^pinned\.dat cannot be opened - it may be in use\. .+ try again\.$"
             $State.KeepPinned | Should Be $false
