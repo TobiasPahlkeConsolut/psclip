@@ -535,7 +535,7 @@ try {
         Wait-Milliseconds 300
         Save-MenuImages "tray-menu-font-$Theme"
         if ((Send-MenuKeys $keyUp, $keyEnter) -and (Wait-Until { (Get-Content $log -Raw) -match 'Popup font: ' })) {
-            $fontLine = [regex]::Match((Get-Content $log -Raw), 'Popup font: (.+) \(row height (\d+) px\)\.')
+            $fontLine = [regex]::Match((Get-Content $log -Raw), 'Popup font: (.+) [\d.]+ pt \(row height (\d+) px\)\.')
         }
     }
     $fontRowHeight = $fontRows = $fontItems = -1

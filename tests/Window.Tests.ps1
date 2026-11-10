@@ -188,3 +188,84 @@ Describe 'Show-TrayWarning' {
         $shown[1] | Should BeExactly 'short'
     }
 }
+
+Describe 'Font sizes' {
+    BeforeEach { Reset-TestState }
+
+    It 'keeps Segoe UI at its size and sizes other fonts to the same letter height' {
+        Get-FontScale ([System.Drawing.FontFamily]::new('Segoe UI')) | Should Be 1
+        $verdana = Get-FontScale ([System.Drawing.FontFamily]::new('Verdana'))   # big letters: smaller
+        $verdana | Should BeLessThan 0.95
+        $verdana | Should BeGreaterThan 0.85
+        Get-FontScale ([System.Drawing.FontFamily]::new('Calibri')) | Should BeGreaterThan 1.03   # small letters
+    }
+
+    It "gives every font of the tray menu Segoe UI's letter height" {
+        $segoe = [System.Drawing.FontFamily]::new('Segoe UI')
+        $target = Get-XHeight $segoe
+        foreach ($name in $FontChoices) {
+            if (-not (Get-InstalledFontName $name)) { continue }
+            $family = [System.Drawing.FontFamily]::new($name)
+            [Math]::Abs((Get-XHeight $family) * (Get-FontScale $family) / $target - 1) | Should BeLessThan 0.01
+            $family.Dispose()
+        }
+        $segoe.Dispose()
+    }
+
+    Context 'a font with odd letters' {
+        Mock Get-XHeight { if ($Family.Name -eq 'Segoe UI') { 0.5 } else { 0.1 } }
+
+        It 'is made at most a third bigger' {
+            Get-FontScale ([System.Drawing.FontFamily]::new('Consolas')) | Should Be 1.33
+        }
+    }
+
+    Context 'a font without letters (symbols)' {
+        Mock Get-XHeight { if ($Family.Name -eq 'Segoe UI') { 0.5 } else { 0 } }
+
+        It 'keeps its size' {
+            Get-FontScale ([System.Drawing.FontFamily]::new('Consolas')) | Should Be 1
+        }
+    }
+
+    Context "Windows' text size at 150 %" {
+        Mock Get-TextScaleFactor { 150 }
+
+        It 'makes the fonts bigger by as much' {
+            Set-UiFonts 'Segoe UI'
+            $Ui.TextScale | Should Be 1.5
+            $Ui.Font.SizeInPoints | Should Be 15
+            $Ui.SmallFont.SizeInPoints | Should Be 12.75
+        }
+    }
+
+    Context 'the text size was never changed' {
+        Mock Get-ItemPropertyValue { throw 'Property TextScaleFactor does not exist.' }
+
+        It 'counts as 100 %' {
+            Get-TextScaleFactor | Should Be 100
+        }
+    }
+
+    Context 'a text size beyond what Windows offers' {
+        Mock Get-ItemPropertyValue { 400 }
+
+        It 'is taken as the largest, 225 %' {
+            Get-TextScaleFactor | Should Be 225
+        }
+    }
+
+    Context 'the text size changed while psclip runs' {
+        Mock Get-TextScaleFactor { 125 }
+        Mock Set-PopupFont {}
+
+        It 'makes the fonts anew when the popup opens - only then' {
+            $Ui.TextScale = 1.0
+            Update-TextScale
+            Assert-MockCalled Set-PopupFont -Times 1 -Exactly -Scope It -ParameterFilter { $Name -eq 'Segoe UI' }
+            $Ui.TextScale = 1.25
+            Update-TextScale
+            Assert-MockCalled Set-PopupFont -Times 1 -Exactly -Scope It
+        }
+    }
+}

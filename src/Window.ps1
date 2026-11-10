@@ -50,16 +50,74 @@ function Initialize-UiMetrics {
 
 function Set-UiFonts {
     # The fonts of the popup and the dialogs in this family: the text, and a smaller one for the status line. Segoe UI
-    # if it is not installed (any more) - Windows would silently take another font.
+    # if it is not installed (any more). Every family looks as big as Segoe UI (Get-FontScale), and Windows' text size
+    # makes them bigger, as it does in Windows' own apps.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingEmptyCatchBlock', '',
+        Justification = 'A family that is not installed is replaced by Segoe UI right after')]
     param([string]$Name)
 
-    $font = [Font]::new($Name, 10)
-    if ($font.Name -ne $Name) {
-        $font.Dispose()
-        $font = [Font]::new('Segoe UI', 10)
+    $family = $null
+    try {
+        $family = [FontFamily]::new($Name)
     }
-    $Ui.Font = $font
-    $Ui.SmallFont = [Font]::new($font.FontFamily, 8.5)
+    catch {
+        # Not installed (any more), e.g. a settings file from another PC.
+    }
+    if ($null -eq $family) { $family = [FontFamily]::new('Segoe UI') }
+    $Ui.TextScale = (Get-TextScaleFactor) / 100
+    $factor = (Get-FontScale $family) * $Ui.TextScale
+    $Ui.Font = [Font]::new($family, [single](10 * $factor))
+    $Ui.SmallFont = [Font]::new($family, [single](8.5 * $factor))
+}
+
+function Get-TextScaleFactor {
+    # Windows' text size (Settings > Accessibility > Text size), 100 to 225 percent. Windows Forms programs do not
+    # follow it by themselves.
+    try {
+        $value = Get-ItemPropertyValue 'HKCU:\Software\Microsoft\Accessibility' -Name TextScaleFactor
+        return [Math]::Min(225, [Math]::Max(100, [int]$value))
+    }
+    catch {
+        return 100   # never changed: no value
+    }
+}
+
+function Get-XHeight {
+    # Height of a lowercase x in this font family, as a share of the font size; 0 for a font without letters.
+    param([FontFamily]$Family)
+
+    $path = [System.Drawing.Drawing2D.GraphicsPath]::new()
+    try {
+        $path.AddString('x', $Family, [int][FontStyle]::Regular, 100, [PointF]::new(0, 0),
+            [StringFormat]::GenericTypographic)
+        $path.GetBounds().Height / 100
+    }
+    finally {
+        $path.Dispose()
+    }
+}
+
+function Get-FontScale {
+    # The factor that gives this family's lowercase letters the height of Segoe UI's at the same size: fonts differ a
+    # lot at the same point size (Fira Code 0.93 - otherwise it looks a good deal bigger). The way CSS's
+    # font-size-adjust does it. Between 0.75 and 1.33, so that an odd font cannot come out tiny or huge.
+    param([FontFamily]$Family)
+
+    $reference = [FontFamily]::new('Segoe UI')
+    try {
+        $own = Get-XHeight $Family
+        $target = Get-XHeight $reference
+    }
+    finally {
+        $reference.Dispose()
+    }
+    if ($own -le 0 -or $target -le 0) { return 1.0 }
+    [Math]::Min(1.33, [Math]::Max(0.75, $target / $own))
+}
+
+function Update-TextScale {
+    # When the popup opens: Windows' text size may have changed since the fonts were made.
+    if ((Get-TextScaleFactor) / 100 -ne $Ui.TextScale) { Set-PopupFont $State.FontName }
 }
 
 function Set-FontLayout {
@@ -89,7 +147,8 @@ function Set-PopupFont {
         [PsClip.Native]::SetDarkControlTheme($Ui.List.Handle, $State.IsDark)
     }
     foreach ($font in $previous) { $font.Dispose() }   # no control uses them any more
-    Write-Verbose "Popup font: $($Ui.Font.Name) (row height $($Ui.List.ItemHeight) px)."
+    Write-Verbose ("Popup font: $($Ui.Font.Name) $([Math]::Round($Ui.Font.SizeInPoints, 1)) pt " +
+        "(row height $($Ui.List.ItemHeight) px).")
 }
 
 function Initialize-ControlHandles {

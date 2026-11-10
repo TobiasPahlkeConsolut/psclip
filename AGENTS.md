@@ -211,7 +211,11 @@ features, quick install, key table, links.
   not `$null` (which becomes `''` - `HasFormatting` would stay true). The form is disposed: no text stays in a
   hidden window.
 - Fonts (`-Font`, `$State.FontName`, tray menu *Font* from `$FontChoices`, those installed): `Set-UiFonts` makes
-  `$Ui.Font` / `$Ui.SmallFont` (Segoe UI if the family is missing - GDI+ would silently substitute another one),
+  `$Ui.Font` / `$Ui.SmallFont` (Segoe UI if the family is missing - GDI+ would silently substitute another one) at
+  10 / 8.5 pt times `Get-FontScale` (the same lowercase letter height as Segoe UI, like CSS `font-size-adjust`;
+  0.75 to 1.33) times Windows' text size (`Get-TextScaleFactor`, `$Ui.TextScale`; `Update-TextScale` re-applies it
+  when the popup opens). There is deliberately no size setting - the owner wants psclip to follow Windows.
+  The hotkey dialog's width grows with the text size;
   `Set-FontLayout` gives the controls the fonts and the sizes that follow (row height, filter box, status line), for
   `New-PopupWindow` and for `Set-PopupFont` at runtime. Thumbnails keep the size of the start font.
   `ConvertFrom-SettingText` checks fonts with `InstalledFontCollection` (per-user fonts included).

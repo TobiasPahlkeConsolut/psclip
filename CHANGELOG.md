@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Every font looks as big as Segoe UI: it is sized to the same letter height (Fira Code looked a good deal bigger,
+  especially in the preview)
+- psclip follows Windows' text size (*Settings > Accessibility > Text size*), not only the display scaling
+
 ## 1.2.0 - 2026-11-09
 
 - **Settings file**: `settings.ini` next to psclip keeps the settings - easy to read and to edit with any text editor

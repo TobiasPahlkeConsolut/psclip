@@ -15,7 +15,7 @@ defaults** for a new `settings.ini`: `MaxMemory = 500MB`, `OpenAt = TextCursor` 
 | `Hotkey`            | `Ctrl+Ö` | Modifiers `Ctrl`, `Alt`, `Shift`, `Win` plus a key: a key name (`V`, `F12`, `Space`, `1`, ...) or the character on the key (`Ö`, `Ä`, `#`, ...) |
 | `Theme`             | `Dark`   | `Dark`, `Light` or `Auto` (follow the Windows app theme)                    |
 | `Size`              | `M`      | Popup size `S`, `M` or `L`: 6, 10 or 15 entries (two lines each), as far as the screen allows |
-| `Font`              | `Segoe UI` | Font of the popup's text - any installed font. The tray menu offers Segoe UI, Calibri, Verdana, Consolas, Cascadia Mono and Fira Code, those that are installed |
+| `Font`              | `Segoe UI` | Font of the popup's text - any installed font, sized so that its letters are as tall as Segoe UI's. The tray menu offers Segoe UI, Calibri, Verdana, Consolas, Cascadia Mono and Fira Code, those that are installed |
 | `OpenAt`            | `Mouse`  | Where the hotkey opens the popup: `Mouse` (pointer) or `TextCursor`         |
 | `MaxMemory`         | `100MB`  | Memory the history may use: `100MB`, `500MB` or `1GB` (pinned entries count, but are never dropped) |
 | `KeepPinned`        | off      | *Keep pinned entries*: pinned entries survive restarts, encrypted (see [Keeping pinned entries](usage.md#keeping-pinned-entries)) |
@@ -59,6 +59,14 @@ KeepAwake = true
 - It is saved as UTF-8, like the tray menu's changes: written to a temporary file first, then swapped in, so an
   interrupted write never leaves half a file. Another instance (`-InstanceName X`) uses `settings-X.ini`. Git ignores
   both.
+
+## Text size
+
+There is no size setting: psclip follows Windows. The display scaling (*Settings > System > Display > Scale*) makes
+everything bigger, and the text size (*Settings > Accessibility > Text size*) makes the text bigger - psclip applies
+a change the next time the popup opens. Each font is sized so that its lowercase letters are as tall as Segoe UI's
+at the same setting: at the same point size, fonts look quite different (Fira Code, for example, would look a good
+deal bigger than Segoe UI).
 
 ## Hotkeys
 

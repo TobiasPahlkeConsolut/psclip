@@ -178,7 +178,7 @@ function Show-HotkeyDialog {
     $scale = $Ui.Scale
     $pad = [int](12 * $scale)
     $gap = [int](6 * $scale)
-    $width = [int](380 * $scale)
+    $width = [int](380 * $scale * $Ui.TextScale)   # Windows' text size makes the texts wider
 
     $form = [Form]::new()
     $form.Text = 'Change hotkey'
@@ -212,7 +212,7 @@ function Show-HotkeyDialog {
     $hint.Location = [Point]::new($pad, $keyBox.Bottom + $gap)
     $hint.Size = [Size]::new($width - 2 * $pad, $Ui.Font.Height * 2)
 
-    $buttonSize = [Size]::new([int](88 * $scale), [int](30 * $scale))
+    $buttonSize = [Size]::new([int](88 * $scale * $Ui.TextScale), [int](30 * $scale * $Ui.TextScale))
     $buttonTop = $hint.Bottom + $gap
     $cancel = New-FlatButton -Text 'Cancel' -Size $buttonSize `
         -Location ([Point]::new($width - $pad - $buttonSize.Width, $buttonTop))

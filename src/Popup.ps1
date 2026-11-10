@@ -23,6 +23,7 @@ function Show-Popup {
     }
 
     Set-Theme (Test-DarkTheme)
+    Update-TextScale
     $State.PreviewVisible = $State.PreviewDefault   # F3 is not remembered from the last time
     $Ui.Preview.Visible = $State.PreviewVisible
     $Ui.PreviewSplitter.Visible = $State.PreviewVisible
