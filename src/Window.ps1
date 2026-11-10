@@ -693,7 +693,10 @@ function Start-ClipboardListener {
     $Ui.ClipboardTimer = $timer
 
     $Ui.ClipHost = [PsClip.ClipboardHost]::new($InstanceName)
-    $Ui.ClipHost.add_ClipboardChanged({ Request-ClipboardRead })
+    $Ui.ClipHost.add_ClipboardChanged({
+        $State.ClipboardNotifications++   # counted for -Verbose (Receive-ClipboardChange)
+        Request-ClipboardRead
+    })
     $Ui.ClipHost.add_HotkeyPressed({ Switch-Popup })
     $Ui.ClipHost.add_CloseRequested({ $Ui.AppContext.ExitThread() })
 }

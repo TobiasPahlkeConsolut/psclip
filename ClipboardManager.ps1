@@ -402,6 +402,7 @@ $State = @{
     MaxEntryLength       = $startSettings.MaxEntryLength   # longer texts are not recorded
     OwnClipboardSequence = 0                     # sequence number of the clipboard change caused by pasting
     ClipboardRetry       = @{ Sequence = 0; Count = 0 }   # reads again of a change the clipboard was busy for
+    ClipboardNotifications = 0                   # clipboard changes since the last read (for -Verbose)
     PasteTarget          = [IntPtr]::Zero        # window to paste into; zero = copy only
     HotkeySpec           = $hotkeySpec           # modifiers and key code, independent of the layout
     HotkeyText           = Format-HotkeySpec $hotkeySpec   # as shown to the user

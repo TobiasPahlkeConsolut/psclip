@@ -66,7 +66,14 @@ function Read-ClipboardEntry {
 }
 
 # The real clipboard, behind functions of their own so that the unit tests can replace them (Mock).
-function Get-ClipboardDataObject { [Clipboard]::GetDataObject() }
+function Get-ClipboardDataObject {
+    # While another program has the clipboard open, tried again every 10 ms (at most 1 s), not every 100 ms like
+    # Clipboard.GetDataObject: psclip handles nothing else meanwhile, and a next copy could replace this one unseen.
+    $waited = 0
+    $data = [PsClip.Native]::GetClipboardData(1000, [ref]$waited)
+    if ($waited -gt 0) { Write-Verbose "The clipboard was busy: opened after $waited ms." }
+    $data
+}
 function Get-ClipboardSequence { [PsClip.Native]::GetClipboardSequenceNumber() }
 function Test-ClipboardContent { [PsClip.Native]::ClipboardHasTextOrImage() }
 
@@ -127,6 +134,10 @@ function Receive-ClipboardChange {
     # The clipboard change caused by pasting an entry is not recorded again: the entry is already
     # in the history, and a plain-text paste must not replace its formatting.
     $sequence = Get-ClipboardSequence
+    # For -Verbose: which change was read, for how many notifications - copies made quickly one after the other can
+    # end up in one read, and only the last of them is then on the clipboard.
+    Write-Verbose "Reading clipboard change $sequence ($($State.ClipboardNotifications) notifications)."
+    $State.ClipboardNotifications = 0
     if ($sequence -eq $State.OwnClipboardSequence) { return }
 
     try {
@@ -145,7 +156,10 @@ function Receive-ClipboardChange {
         }
         return
     }
-    if ($null -eq $entry) { return }
+    if ($null -eq $entry) {
+        Write-Verbose "Clipboard change $sequence has nothing to record."
+        return
+    }
 
     $selected = Get-SelectedEntry
     Add-ClipboardEntry $entry

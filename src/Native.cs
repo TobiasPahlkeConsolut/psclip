@@ -169,6 +169,36 @@ namespace PsClip
                 IsClipboardFormatAvailable(RegisterClipboardFormat("PNG"));
         }
 
+        [DllImport("ole32.dll")]
+        static extern int OleGetClipboard(out ComDataObject data);
+
+        // The clipboard's content as Windows Forms reads it (a DataObject over the OLE clipboard, the same as
+        // Clipboard.GetDataObject returns). While another program has the clipboard open, it tries again every 10 ms,
+        // for at most timeoutMs: Clipboard.GetDataObject waits 100 ms between its tries, and psclip handles nothing
+        // else meanwhile - a next copy can replace this one, which psclip then never sees. waitedMs: the time it took.
+        public static System.Windows.Forms.IDataObject GetClipboardData(int timeoutMs, out int waitedMs)
+        {
+            Application.OleRequired();   // OLE on this thread, as Clipboard.GetDataObject makes sure of
+            ComDataObject data = null;
+            int result = RetryWhileFailing(delegate { return OleGetClipboard(out data); }, timeoutMs, 10, out waitedMs);
+            if (result != 0) Marshal.ThrowExceptionForHR(result);
+            return data == null ? null : new DataObject(data);
+        }
+
+        // Calls attempt until it returns S_OK (0), waiting stepMs between the tries (answering sent messages, see
+        // Wait), at most timeoutMs in all; returns the last result. waitedMs: the time it took.
+        public static int RetryWhileFailing(Func<int> attempt, int timeoutMs, int stepMs, out int waitedMs)
+        {
+            int start = Environment.TickCount;
+            while (true)
+            {
+                int result = attempt();
+                waitedMs = Environment.TickCount - start;
+                if (result == 0 || waitedMs >= timeoutMs) return result;
+                Wait(stepMs);
+            }
+        }
+
         public static byte[] ReadFormatBytes(object dataObject, string formatName, int maxBytes)
         {
             ComDataObject data = dataObject as ComDataObject;

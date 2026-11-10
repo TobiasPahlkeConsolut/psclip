@@ -148,6 +148,11 @@ features, quick install, key table, links.
   `Read-ClipboardEntry` (reading the clipboard itself, no `-Data`) gets neither text nor an image although
   `PsClip.Native.ClipboardHasTextOrImage` (asks without opening the clipboard) says there is one, it throws, and
   `Receive-ClipboardChange` reads that change again up to `$ClipboardReadRetries` times, `$ClipboardReadDelay` apart.
+  Opening the clipboard (`Get-ClipboardDataObject` -> `PsClip.Native.GetClipboardData`, `OleGetClipboard` wrapped in a
+  `DataObject` exactly like `Clipboard.GetDataObject` does) tries again every 10 ms while another program has it open,
+  at most 1 s - `Clipboard.GetDataObject` sleeps 100 ms between its tries, during which psclip handles nothing else
+  and a next copy can replace the one being read (it is then never seen; nothing is logged). `-Verbose` logs the
+  wait ("The clipboard was busy: opened after N ms").
 - `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
   `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,

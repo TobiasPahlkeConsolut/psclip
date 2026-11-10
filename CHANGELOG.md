@@ -7,6 +7,10 @@
 - psclip follows Windows' text size (*Settings > Accessibility > Text size*), not only the display scaling
 - Choosing the font that is already selected in the tray menu no longer makes the entries' text disappear
 - The documentation shows the popup in each font (*Options > Fonts*)
+- While another program has the clipboard open (Teams, Horizon, Windows' clipboard history), psclip tries again
+  every 10 ms instead of every 100 ms - so a copy that follows another quickly is less likely to be missed
+- `-Verbose` logs each clipboard read (the change it read, for how many notifications) and reads that found nothing
+  to record
 
 ## 1.2.0 - 2026-11-09
 

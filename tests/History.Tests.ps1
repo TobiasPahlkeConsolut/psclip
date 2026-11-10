@@ -940,3 +940,28 @@ Describe 'Format-MemorySize' {
         Format-MemorySize 500 | Should BeExactly '0.1 MB'
     }
 }
+
+Describe 'Opening a busy clipboard (Native.RetryWhileFailing)' {
+    It 'tries again in short steps until the clipboard is free' {
+        $cannotOpen = -2147221040   # CLIPBRD_E_CANT_OPEN: another program has the clipboard open
+        $counter = @{ Tries = 0 }
+        $attempt = {
+            $counter.Tries++
+            if ($counter.Tries -lt 4) { $cannotOpen } else { 0 }
+        }.GetNewClosure()
+        $waited = 0
+        [PsClip.Native]::RetryWhileFailing([Func[int]]$attempt, 1000, 10, [ref]$waited) | Should Be 0
+        $counter.Tries | Should Be 4
+        $waited | Should BeGreaterThan 20
+        $waited | Should BeLessThan 200   # three short waits - not 100 ms each, as Clipboard.GetDataObject waits
+    }
+
+    It 'gives up after the time limit, with the last result' {
+        $cannotOpen = -2147221040
+        $waited = 0
+        [PsClip.Native]::RetryWhileFailing([Func[int]]{ $cannotOpen }.GetNewClosure(), 100, 10, [ref]$waited) |
+            Should Be $cannotOpen
+        $waited | Should BeGreaterThan 99
+        $waited | Should BeLessThan 400
+    }
+}
