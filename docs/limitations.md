@@ -16,8 +16,13 @@
 - **Opening at the text cursor** needs the program to report where its text cursor is. Classic Windows programs and
   Office do, browsers and Electron apps (VS Code, Teams) report it for screen magnifiers; others, e.g. terminals,
   don't - then the popup opens at the mouse pointer.
+- **Copies in very quick succession** - several within a fraction of a second, e.g. by a script - can now and then
+  miss one: the clipboard holds only the latest content, and other programs that read every change (Windows'
+  clipboard history, Teams, remote desktop clients like Horizon) keep it busy for a few milliseconds each time. In a
+  test with copies 300 ms apart on a busy desktop, about 1 in 100 was missed; copies at a normal pace were not.
+  `-Verbose` logs each clipboard read, which helps with a bug report.
 - **In memory only** means psclip never writes the history anywhere - except the pinned entries with *Keep pinned
-  entries*. Windows itself may still move memory to the page file or into a crash dump, like for any program.
+  entries* (and the settings, in `settings.ini`). Windows itself may still move memory to the page file or into a crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is
   still put on the clipboard - press `Ctrl+V` yourself.
 - **Combinations already taken** by another program cannot be captured in the *Change hotkey* dialog: nothing

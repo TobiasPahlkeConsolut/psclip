@@ -152,7 +152,10 @@ features, quick install, key table, links.
   `DataObject` exactly like `Clipboard.GetDataObject` does) tries again every 10 ms while another program has it open,
   at most 1 s - `Clipboard.GetDataObject` sleeps 100 ms between its tries, during which psclip handles nothing else
   and a next copy can replace the one being read (it is then never seen; nothing is logged). `-Verbose` logs the
-  wait ("The clipboard was busy: opened after N ms").
+  wait ("The clipboard was busy: opened after N ms"), every read ("Reading clipboard change <sequence> (<n>
+  notifications)" - `$State.ClipboardNotifications`, counted by the `ClipboardChanged` handler; one `Set-Clipboard` gives
+  3) and a read that found neither text nor an image ("... has nothing to record"). Copies 300 ms apart on a busy
+  desktop still lose about 1 in 100 for an unknown reason - these lines are there to find it.
 - `Set-ClipboardEntry` remembers the clipboard sequence number of its own write (`$State.OwnClipboardSequence`), and
   `Receive-ClipboardChange` ignores that change - otherwise a plain-text paste would replace the stored formatting.
 - **Event handlers run after the function that registered them has returned**, so handlers may only use `$Ui`,
