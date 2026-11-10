@@ -148,6 +148,24 @@ Describe 'Popup window and tray menu, built hidden (never shown)' {
         $Ui.List.Font.Name | Should BeExactly 'Segoe UI'
     }
 
+    It 'can still draw the entries when the font in use is chosen again' {
+        # Windows Forms keeps its font object when given an equal one: that one must not have been disposed.
+        Set-PopupFont 'Segoe UI'
+        Set-PopupFont 'Segoe UI'
+        $bitmap = [System.Drawing.Bitmap]::new(300, 60)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            $bounds = [System.Drawing.Rectangle]::new(0, 0, 300, 60)
+            { [PsClip.ListPainter]::DrawText($graphics, 'text', $Ui.List.Font, $bounds, [System.Drawing.Color]::Black,
+                [System.Drawing.Color]::Yellow, [string[]]@()) } | Should Not Throw
+            { [System.Windows.Forms.TextRenderer]::MeasureText('text', $Ui.Status.Font) } | Should Not Throw
+        }
+        finally {
+            $graphics.Dispose()
+            $bitmap.Dispose()
+        }
+    }
+
     It 'takes Segoe UI for a font that is not installed' {
         Set-UiFonts 'No Such Font psclip'
         $Ui.Font.Name | Should BeExactly 'Segoe UI'

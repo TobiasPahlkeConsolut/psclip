@@ -146,7 +146,13 @@ function Set-PopupFont {
         # A new row height may give the list a new window - without its dark scroll bar.
         [PsClip.Native]::SetDarkControlTheme($Ui.List.Handle, $State.IsDark)
     }
-    foreach ($font in $previous) { $font.Dispose() }   # no control uses them any more
+    # Only fonts no control uses any more: Windows Forms ignores a font equal to the one it has (Control.Font compares
+    # with Equals), so the same font chosen again leaves the old object in the controls - disposed, the list could no
+    # longer draw its text.
+    $inUse = $Ui.Form.Font, $Ui.Status.Font, $Ui.PreviewInfo.Font
+    foreach ($old in $previous) {
+        if (@($inUse | Where-Object { [object]::ReferenceEquals($_, $old) }).Count -eq 0) { $old.Dispose() }
+    }
     Write-Verbose ("Popup font: $($Ui.Font.Name) $([Math]::Round($Ui.Font.SizeInPoints, 1)) pt " +
         "(row height $($Ui.List.ItemHeight) px).")
 }

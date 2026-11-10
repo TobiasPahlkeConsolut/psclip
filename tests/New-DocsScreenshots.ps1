@@ -52,26 +52,6 @@ $managerScript = (Resolve-Path (Join-Path $PSScriptRoot '..\ClipboardManager.ps1
 $OutputDirectory = (Resolve-Path $OutputDirectory).Path
 $log = Join-Path $env:TEMP 'psclip-docs-manager.log'
 
-function New-SampleImage {
-    # A screenshot-like image of an error message - text for the OCR search to find.
-    $bitmap = [System.Drawing.Bitmap]::new(560, 170)
-    $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-    $graphics.TextRenderingHint = 'ClearTypeGridFit'
-    $graphics.Clear([System.Drawing.Color]::White)
-    $graphics.FillRectangle([System.Drawing.Brushes]::Firebrick, 0, 0, 560, 44)
-    # Sizes in pixels, not points: in points the text grows with the display scaling and runs off the image, so OCR
-    # would not see 'timed out'.
-    $titleFont = [System.Drawing.Font]::new('Segoe UI Semibold', 19, [System.Drawing.GraphicsUnit]::Pixel)
-    $textFont = [System.Drawing.Font]::new('Segoe UI', 17, [System.Drawing.GraphicsUnit]::Pixel)
-    $graphics.DrawString('Deployment failed', $titleFont, [System.Drawing.Brushes]::White, 16, 9)
-    $graphics.DrawString("Error 4711: connection to the server timed out.`nPlease try again later.", $textFont,
-        [System.Drawing.Brushes]::Black, 16, 64)
-    $titleFont.Dispose()
-    $textFont.Dispose()
-    $graphics.Dispose()
-    $bitmap
-}
-
 function Copy-Sample {
     param($Content)
 

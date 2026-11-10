@@ -60,6 +60,21 @@ KeepAwake = true
   interrupted write never leaves half a file. Another instance (`-InstanceName X`) uses `settings-X.ini`. Git ignores
   both.
 
+## Fonts
+
+*Font* in the tray menu (or `Font = ...` in `settings.ini`) changes the font of the popup's text. The same entries in
+each font of the menu - Fira Code only if it is installed, it does not come with Windows:
+
+| Segoe UI (default) | Calibri |
+| --- | --- |
+| ![The popup in Segoe UI](font-segoe-ui.png) | ![The popup in Calibri](font-calibri.png) |
+| **Verdana** | **Consolas** |
+| ![The popup in Verdana](font-verdana.png) | ![The popup in Consolas](font-consolas.png) |
+| **Cascadia Mono** | **Fira Code** |
+| ![The popup in Cascadia Mono](font-cascadia-mono.png) | ![The popup in Fira Code](font-fira-code.png) |
+
+Monospace fonts (Consolas, Cascadia Mono, Fira Code) suit code and IDs, but fit fewer characters into a row.
+
 ## Text size
 
 There is no size setting: psclip follows Windows. The display scaling (*Settings > System > Display > Scale*) makes

@@ -29,6 +29,7 @@ features, quick install, key table, links.
 | `tests/Invoke-UnitTests.ps1`      | Runs all `*.Tests.ps1` with Pester 3/4                               |
 | `tests/Test-ClipboardManager.ps1` | End-to-end test on the real desktop                                  |
 | `tests/New-DocsScreenshots.ps1`   | Takes the README screenshots (`docs/*.png`) with sample content      |
+| `tests/New-FontScreenshots.ps1`   | The popup in each font (`docs/font-*.png`), off the screen - runs without disturbing anyone |
 | `tests/TestSupport.ps1`           | Window helpers shared by the two scripts above                       |
 | `docs/`                           | The documentation (`install.md`, `usage.md`, `options.md`, `limitations.md`, `development.md`) and its screenshots |
 | `CHANGELOG.md`                    | Changes per version - also the GitHub release notes                  |
@@ -153,7 +154,9 @@ features, quick install, key table, links.
   `$State`, script-level variables, functions and their own parameters - never local variables of the
   constructing function. (Exception: `Show-HotkeyDialog`, whose handlers run inside `ShowDialog()`.)
 - PowerShell variable names are case-insensitive: never name a local variable `$state`, `$ui`, `$size`, `$theme`,
-  `$hotkey` or `$keepAwake` (they would shadow `$State`, `$Ui` or the script parameters).
+  `$hotkey`, `$keepAwake` or `$font` (they would shadow `$State`, `$Ui` or the script parameters). Where the app is
+  dot-sourced into a script's scope (the tests), `$font = [Font]...` there would even assign the `[string]`
+  parameter `-Font` and turn the font into text.
 - Hotkeys: `ConvertFrom-HotkeyText` parses and validates (`Get-HotkeyProblem`: no plain keys, no Shift+character,
   no AltGr combinations) for the parameter, the dialog and `Install.ps1` alike. `$State.HotkeySpec` keeps the key
   code; `$State.HotkeyText` is display text only and depends on the keyboard layout - never parse it again.
@@ -233,6 +236,9 @@ features, quick install, key table, links.
 
 ## PowerShell pitfalls already hit here
 
+- Windows Forms ignores a `Font` equal to the one a control has (the setter compares with `Equals`) and keeps the old
+  object: never dispose a previous font that a control may still hold (`Set-PopupFont` checks which are in use).
+  Drawing with a disposed font fails with "Parameter is not valid".
 - `switch` on a `[Keys]` value with string labels compares names: `'Enter'` never matches (`Return`), nor
   `'PageDown'` (`Next`). Use enum constants: `([Keys]::Enter) { ... }`.
 - Casting a string to an enum (`[Keys]'f12'`) is case-sensitive here; use `[Enum]::Parse([Keys], $name, $true)`.
@@ -300,7 +306,8 @@ features, quick install, key table, links.
    ```
    Exit code 0 = all steps passed. Look at the screenshots it writes to `%TEMP%\ClipboardManagerTests`.
 3. When the look of the popup or the tray menu changes, run `tests\New-DocsScreenshots.ps1` (same rules: ask
-   first) and check the new `docs\*.png` before committing them. With `-DefaultHotkey` the tray menu shows the
+   first) and check the new `docs\*.png` before committing them. `tests\New-FontScreenshots.ps1` (the fonts) needs
+   no break: it never shows anything on the screen, touches no clipboard and sends no keys. With `-DefaultHotkey` the tray menu shows the
    default hotkey as users see it - only possible while the user's psclip is not running.
 
 ## Installer defaults

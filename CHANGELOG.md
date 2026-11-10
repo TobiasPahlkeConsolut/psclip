@@ -5,6 +5,8 @@
 - Every font looks as big as Segoe UI: it is sized to the same letter height (Fira Code looked a good deal bigger,
   especially in the preview)
 - psclip follows Windows' text size (*Settings > Accessibility > Text size*), not only the display scaling
+- Choosing the font that is already selected in the tray menu no longer makes the entries' text disappear
+- The documentation shows the popup in each font (*Options > Fonts*)
 
 ## 1.2.0 - 2026-11-09
 
