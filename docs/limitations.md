@@ -22,7 +22,8 @@
   test with copies 300 ms apart on a busy desktop, about 1 in 100 was missed; copies at a normal pace were not.
   `-Verbose` logs each clipboard read, which helps with a bug report.
 - **In memory only** means psclip never writes the history anywhere - except the pinned entries with *Keep pinned
-  entries* (and the settings, in `settings.ini`). Windows itself may still move memory to the page file or into a crash dump, like for any program.
+  entries* (and the settings, in `settings.ini`). Windows itself may still move memory to the page file or into a
+  crash dump, like for any program.
 - **Windows running as administrator** do not accept the simulated `Ctrl+V` from a normal process. The entry is
   still put on the clipboard - press `Ctrl+V` yourself.
 - **Combinations already taken** by another program cannot be captured in the *Change hotkey* dialog: nothing

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.1 - 2026-11-10
 
 - Every font looks as big as Segoe UI: it is sized to the same letter height (Fira Code looked a good deal bigger,
   especially in the preview)

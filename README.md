@@ -29,7 +29,7 @@ Needs Windows 10 or 11 with Windows PowerShell 5.1, which comes with Windows. Do
 folder:
 
 ```powershell
-Expand-Archive .\psclip-1.2.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
+Expand-Archive .\psclip-1.2.1.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
 cd $env:LOCALAPPDATA\tools\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
