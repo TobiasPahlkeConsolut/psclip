@@ -105,7 +105,8 @@ function Step-Ocr {
                 $job.Entry.OcrText = ($job.Task.Result.Lines | ForEach-Object { $_.Text }) -join "`r`n"
                 Write-Verbose "Text recognized in an image: $($job.Entry.OcrText.Length) chars."
                 if ($Ui.Form.Visible) {
-                    Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry (Get-SelectedEntry)
+                    $selected = Get-SelectedEntry
+                    Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry $selected -KeepSelection
                 }
             }
         }

@@ -203,6 +203,24 @@ features, quick install, key table, links.
   `MeasureCharacterRanges`) line up with the text; `TextRenderer` (GDI) would lay the text out differently.
   `ClipEntry.ListText` keeps line breaks as `\n` (empty lines and indentation dropped); for images it is the size
   plus the recognized text on the second line.
+- Several selected rows (`Shift`/`Ctrl` with keys or clicks, `Ctrl+A`): the list box stays single-select - its
+  `SelectedIndex` is the *cursor row* (preview, `F2`, `Alt+number`, `Get-SelectedEntry`) - and psclip keeps the
+  selection of several rows itself: `$State.Selected` (a `HashSet` of entries, by reference; empty = only the cursor
+  row) and `$State.SelectionAnchor` (where a Shift range starts). `Write-ListItem` draws from it when it is not empty;
+  the actions take `Get-SelectedEntries` (list order). Keys set the selection *before* moving the cursor row, because
+  `SelectedIndexChanged` runs `Sync-ListSelection`: a cursor row outside the selection leaves only that row selected.
+  A left click is handled when the button goes down (`Start-ListClick`; the list box has moved the cursor row then),
+  but the list box raises `SelectedIndexChanged` only when it is released, before `MouseUp`
+  (`Complete-MouseSelection`) - so `$State.ListClick` makes `Sync-ListSelection` wait for the click, and
+  `$State.ListRefill` for `Update-PopupList` (after `Items.Clear`, selecting a row always raises the event). A plain
+  click on one of several selected rows keeps them in `$State.SelectionBeforeClick` for a double-click
+  (`Invoke-DoubleClickedEntry`). `Window.Tests.ps1` sends real mouse messages to the hidden list box for that order
+  (`PsClipTest.MouseMessage`; `MouseDoubleClick` needs the real mouse over the window). `Update-PopupList
+  -KeepSelection` (pinning, refreshes in the background) keeps the selected rows still shown - by reference, so an
+  entry replaced by a re-copy drops out; without it (typing) one row is selected. Several entries are pasted as one
+  plain text (`Join-EntryText`: oldest `Copied` first); `Switch-ClipboardPin` and `Remove-ClipboardEntry` take several
+  entries and save once. Not `SelectionMode MultiExtended`: there `SelectedIndex` is the lowest selected row, setting
+  it adds to the selection, and every `SetSelected` raises `SelectedIndexChanged` (a preview per row).
 - `Alt+number` must not react to Ctrl+Alt: that is AltGr, which types characters into the filter (AltGr+7 = `{` on
   a German keyboard). The preview (`F3`, `$Ui.Preview`) is a bottom-docked panel; showing
   it makes the popup taller by its height (`Switch-Preview`, `Move-PopupIntoScreen`). Each opening resets it:

@@ -105,6 +105,45 @@ Describe 'Popup window and tray menu, built hidden (never shown)' {
         $bitmap.Dispose()
     }
 
+    It 'draws the rows selected with Shift or Ctrl as selected - then only those' {
+        Update-PopupList
+        Select-RowRange 0 1
+        $height = $Ui.List.ItemHeight
+        $bitmap = [System.Drawing.Bitmap]::new(400, $height)
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $bounds = [System.Drawing.Rectangle]::new(0, 0, 400, $height)
+        try {
+            # Row 1 is selected though the list box says not, row 2 is not though the list box says so.
+            Write-ListItem ([System.Windows.Forms.DrawItemEventArgs]::new($graphics, $Ui.Font, $bounds, 1, 'None'))
+            $bitmap.GetPixel(395, 2).ToArgb() | Should Be $Palettes.Dark.SelBack.ToArgb()
+            Write-ListItem ([System.Windows.Forms.DrawItemEventArgs]::new($graphics, $Ui.Font, $bounds, 2, 'Selected'))
+            $bitmap.GetPixel(395, 2).ToArgb() | Should Be $Palettes.Dark.Back.ToArgb()
+        }
+        finally {
+            $graphics.Dispose()
+            $bitmap.Dispose()
+            Clear-ListSelection
+        }
+    }
+
+    It 'offers the actions for several selected entries in the context menu' {
+        Update-PopupList
+        Select-RowRange 0 2
+        Update-ListMenu | Should Be $true
+        $Ui.ListMenuUse.Text | Should BeExactly 'Copy 3 entries'
+        $Ui.ListMenuPlain.Available | Should Be $false   # several are always pasted as plain text
+        $Ui.ListMenuEdit.Available | Should Be $false
+        $Ui.ListMenuPin.Text | Should BeExactly 'Pin to top'   # not all of them are pinned
+        $Ui.ListMenuRemove.Text | Should BeExactly 'Remove 3 entries'
+
+        Clear-ListSelection
+        Update-ListMenu | Should Be $true
+        $Ui.ListMenuUse.Text | Should BeExactly 'Copy'
+        $Ui.ListMenuPin.Text | Should BeExactly 'Unpin'   # the cursor row: the pinned 'plain'
+        $Ui.ListMenuEdit.Available | Should Be $true
+        $Ui.ListMenuRemove.Text | Should BeExactly 'Remove'
+    }
+
     It 'removes the selected entry and keeps the selection on that row' {
         Update-PopupList
         $Ui.List.SelectedIndex = 1   # the image
@@ -184,6 +223,98 @@ Describe 'Popup window and tray menu, built hidden (never shown)' {
             Assert-MockCalled Set-ClipboardEntry -Scope It -Exactly 1 -ParameterFilter { $Entry.Text -eq 'older' }
             $State.History[0].Text | Should BeExactly 'older'
             $Ui.List.Items.Count | Should Be 0   # closed: nothing stays in the hidden list
+        }
+    }
+
+    $Ui.Tray.Dispose()
+    $Ui.Form.Dispose()
+}
+
+Describe 'Clicks on the list: mouse messages to the hidden list box, with its own events in their real order' {
+    # The list box moves its cursor row when the button goes down but raises SelectedIndexChanged only when it is
+    # released - unit tests calling the click functions directly would not see that. Only MouseDoubleClick cannot be
+    # had this way: WinForms raises it only for the window under the real mouse, which a hidden one never is.
+    Reset-TestState
+    Initialize-UiMetrics
+    New-PopupWindow
+    New-TrayIcon
+    Set-Theme $true
+    Add-Entries 'e1', 'e2', 'e3', 'e4', 'e5'   # rows 0 to 4: e5 ... e1
+
+    function Send-Click {
+        param([int]$Row, [int]$Keys = 0, [switch]$Double)
+        $rect = $Ui.List.GetItemRectangle($Row)
+        $down = if ($Double) { [PsClipTest.MouseMessage]::LeftDoubleClick } else { [PsClipTest.MouseMessage]::LeftDown }
+        $handle = $Ui.List.Handle
+        [PsClipTest.MouseMessage]::Send($handle, $down, $Keys -bor 1, $rect.X + 5, $rect.Y + 5)
+        [PsClipTest.MouseMessage]::Send($handle, [PsClipTest.MouseMessage]::LeftUp, $Keys, $rect.X + 5, $rect.Y + 5)
+    }
+
+    Context 'Ctrl held' {
+        Mock Get-ModifierKeys { [System.Windows.Forms.Keys]::Control }
+        $ctrl = [PsClipTest.MouseMessage]::Control
+
+        It 'takes a row out of the selection with Ctrl+click - it stays out when the button is released' {
+            Update-PopupList
+            Select-RowRange 0 3
+            Send-Click 3 $ctrl
+            Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+            $State.ListClick | Should Be $false
+        }
+
+        It 'adds a row with Ctrl+click and takes it out again' {
+            Update-PopupList
+            Send-Click 2 $ctrl
+            Get-SelectedTexts | Should BeExactly 'e5|e3'
+            Send-Click 2 $ctrl
+            Get-SelectedTexts | Should BeExactly 'e5'
+        }
+
+        It 'keeps such a selection when the list is refreshed, e.g. for a new copy - also around the cursor row' {
+            Update-PopupList
+            Select-RowRange 0 3
+            Send-Click 3 $ctrl   # the cursor row (e2) is not selected now
+            Add-Entries 'new'
+            try {
+                Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry (Get-SelectedEntry) -KeepSelection
+                Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+                (Get-SelectedEntry).Text | Should BeExactly 'e2'
+            }
+            finally {
+                Remove-ClipboardEntry (Get-Entry 'new')   # the other tests expect e5 ... e1
+            }
+        }
+    }
+
+    Context 'Shift held' {
+        Mock Get-ModifierKeys { [System.Windows.Forms.Keys]::Shift }
+
+        It 'selects the rows from the cursor row up to a Shift+click' {
+            Update-PopupList
+            Send-Click 3 ([PsClipTest.MouseMessage]::Shift)
+            Get-SelectedTexts | Should BeExactly 'e5|e4|e3|e2'
+        }
+    }
+
+    Context 'no key held' {
+        Mock Get-ModifierKeys { [System.Windows.Forms.Keys]::None }
+        Mock Invoke-SelectedEntry { $script:pasted = Get-SelectedTexts }
+
+        It 'selects only the clicked row' {
+            Update-PopupList
+            Select-RowRange 0 2
+            Send-Click 4
+            Get-SelectedTexts | Should BeExactly 'e1'
+        }
+
+        It 'keeps the selected rows for a double-click on one of them' {
+            Update-PopupList
+            Select-RowRange 0 2
+            Send-Click 1
+            Send-Click 1 -Double
+            Get-SelectedTexts | Should BeExactly 'e4'   # for now
+            Invoke-DoubleClickedEntry 1   # what MouseDoubleClick calls
+            $script:pasted | Should BeExactly 'e5|e4|e3'
         }
     }
 

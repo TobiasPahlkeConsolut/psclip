@@ -18,6 +18,8 @@ in a text file.
 - **Finds text in screenshots**: Windows' built-in OCR recognizes it in the background, offline
 - **Easy to read**: two lines per entry, shaded rows, the filter's words highlighted, numbered rows for `Alt+1` ...
 - **Preview** (`F3`), **edit** (`F2`) and **pin** (`Ctrl+P`) entries - pinned entries can survive restarts
+- **Several at once**: select entries with `Shift` or `Ctrl` (or all with `Ctrl+A`) to paste them in one go, one per
+  line, or to pin or remove them together
 - Dark or light, three sizes, a choice of fonts; settings in the tray menu and in a simple text file
   (`settings.ini`); skips what password managers mark as private
 - **Keep awake** (optional, unrelated to the clipboard): keeps the session from going idle
@@ -29,7 +31,7 @@ Needs Windows 10 or 11 with Windows PowerShell 5.1, which comes with Windows. Do
 folder:
 
 ```powershell
-Expand-Archive .\psclip-1.2.1.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
+Expand-Archive .\psclip-1.3.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
 cd $env:LOCALAPPDATA\tools\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
@@ -46,13 +48,14 @@ Press the hotkey anywhere:
 | ------------------------------ | ------------------------------------------------ |
 | *type*                         | Filter - every word must match; also searches the text in images |
 | `Up` / `Down`, `PgUp` / `PgDn` | Move the selection                               |
-| `Enter`, double-click          | Paste the entry into the window that was active, with its formatting |
+| `Shift` + those keys, `Shift+click`, `Ctrl+click`, `Ctrl+A` | Select several entries (`Ctrl+A`: all shown) |
+| `Enter`, double-click          | Paste the entry into the window that was active, with its formatting - several: as plain text, oldest first, one per line |
 | `Shift+Enter`                  | Paste it as plain text                           |
 | `Alt+1` ... `Alt+9`, `Alt+0`   | Paste the entry with that number                 |
 | `F3`                           | Show / hide the preview                          |
 | `F2`                           | Edit the text (`Esc` saves)                      |
-| `Ctrl+P`                       | Pin / unpin the entry                            |
-| `Shift+Delete`                 | Remove the entry                                 |
+| `Ctrl+P`                       | Pin / unpin the selected entries                 |
+| `Shift+Delete`                 | Remove the selected entries                      |
 | `Esc`, click elsewhere         | Close                                            |
 
 Right-click an entry for the same actions, and the tray icon (a small blue clipboard) for the settings.

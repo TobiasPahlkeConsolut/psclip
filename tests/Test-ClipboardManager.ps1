@@ -216,6 +216,27 @@ try {
     $quickPasted = $thirdItem -and (Wait-Until { $targetBox.Text -eq $thirdItem })
     Add-Result 'Alt+3 pastes the third row' $quickPasted "third row: '$thirdItem', target text: '$($targetBox.Text)'"
 
+    # --- several entries: real Shift+Down selects two rows, Enter pastes them as one text, oldest first ---
+    # Rows 2 and 3: the last row is the initial entry, the oldest - so the pasted order is the list's, reversed.
+    $targetBox.Clear()
+    $severalExpected = $null
+    if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
+        $rows = @([TestNative]::ListBoxItems($listBox))
+        Send-PostedKey $searchBox $keyDown
+        Send-PostedKey $searchBox $keyDown   # -> row 2
+        Wait-Milliseconds 200
+        if ($rows.Count -eq 4 -and (Test-Foreground $popup)) {
+            [TestNative]::PressKeys(0x10, $keyDown)   # Shift+Down -> rows 2 and 3
+            Wait-Milliseconds 200
+            $severalExpected = "$($rows[3])`n$($rows[2])"   # a RichTextBox keeps line breaks as LF
+            Send-PostedKey $searchBox $keyEnter
+        }
+    }
+    $severalPasted = $severalExpected -and (Wait-Until { $targetBox.Text -eq $severalExpected })
+    $severalClipboard = if ($severalPasted) { '' } else { ", clipboard: '$(Get-Clipboard -Raw)'" }   # which side failed
+    Add-Result 'Shift+Down selects two rows, Enter pastes both, oldest first' $severalPasted `
+        "expected: '$severalExpected', target text: '$($targetBox.Text)'$severalClipboard"
+
     # --- formatting: Enter pastes with formatting, Shift+Enter as plain text ---
     $boldText = 'psclip test: bold'
     $formatted = [DataObject]::new()

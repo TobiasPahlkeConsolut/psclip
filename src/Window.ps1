@@ -290,7 +290,10 @@ function New-PopupWindow {
 
     # Event handlers run after this function has returned: use $Ui / $State, not local variables.
     $search.add_TextChanged({ if ($Ui.Form.Visible) { Update-PopupList } })   # Hide-Popup empties it
-    $list.add_SelectedIndexChanged({ Update-Preview })
+    $list.add_SelectedIndexChanged({
+        Sync-ListSelection
+        Update-Preview
+    })
     $form.add_Resize({ if ($Ui.Form.Visible) { Update-StatusText } })
     $preview.add_Resize({ Update-PreviewTextHeight })
     # The splitter sets the preview's bounds while the form is laying out; the preview's own
@@ -323,19 +326,27 @@ function New-PopupWindow {
     })
     $list.add_MouseDoubleClick({
         param($source, $e)
-        if ($Ui.List.IndexFromPoint($e.Location) -ge 0) { Invoke-SelectedEntry }
+        Invoke-DoubleClickedEntry $Ui.List.IndexFromPoint($e.Location)
     })
+    # The list box selects one row itself (the cursor row); several rows, with Shift and Ctrl, are psclip's own
+    # selection ($State.Selected), drawn by Write-ListItem. A left click: MouseDown (the cursor row has moved
+    # already), then - when the button is released - SelectedIndexChanged, Click or MouseDoubleClick, MouseUp.
     $list.add_MouseDown({
         param($source, $e)
+        $index = $Ui.List.IndexFromPoint($e.Location)
         if ($e.Button -eq 'Right') {
-            # Select the entry under the mouse before the context menu opens.
-            $index = $Ui.List.IndexFromPoint($e.Location)
-            if ($index -ge 0) { $Ui.List.SelectedIndex = $index }
+            Select-RowForMenu $index   # before the context menu opens
+        }
+        elseif ($e.Button -eq 'Left') {
+            Start-ListClick $index $e.Clicks (Get-ModifierKeys)
         }
     })
     $list.add_MouseUp({
         param($source, $e)
-        if ($e.Button -eq 'Left') { [void]$Ui.Search.Focus() }   # keep typing going to the filter box
+        if ($e.Button -eq 'Left') {
+            Complete-MouseSelection (Get-ModifierKeys)
+            [void]$Ui.Search.Focus()   # keep typing going to the filter box
+        }
     })
     $form.add_KeyDown({
         param($source, $e)
@@ -373,9 +384,9 @@ function New-ListMenu {
     $Ui.ListMenuEdit.ShortcutKeyDisplayString = 'F2'
     $Ui.ListMenuEdit.add_Click({ Edit-SelectedEntry })
 
-    $remove = $menu.Items.Add('Remove')
-    $remove.ShortcutKeyDisplayString = 'Shift+Del'
-    $remove.add_Click({
+    $Ui.ListMenuRemove = $menu.Items.Add('Remove')
+    $Ui.ListMenuRemove.ShortcutKeyDisplayString = 'Shift+Del'
+    $Ui.ListMenuRemove.add_Click({
         Remove-SelectedEntry
         [void]$Ui.Search.Focus()
     })
@@ -390,22 +401,31 @@ function New-ListMenu {
 
     $menu.add_Opening({
         param($source, $e)
-        $entry = Get-SelectedEntry
-        if ($null -eq $entry) {
-            $e.Cancel = $true
-            return
-        }
-        $verb = if ($State.PasteTarget -ne [IntPtr]::Zero) { 'Paste' } else { 'Copy' }
-        $Ui.ListMenuUse.Text = $verb
-        $Ui.ListMenuPlain.Text = "$verb as plain text"
-        $Ui.ListMenuPlain.Visible = $entry.HasFormatting   # same as the normal paste otherwise
-        $Ui.ListMenuPin.Text = if ($State.Pinned.Contains($entry)) { 'Unpin' } else { 'Pin to top' }
-        $Ui.ListMenuEdit.Visible = -not $entry.IsImage
-        $Ui.ListMenuPreview.Checked = $State.PreviewVisible
+        if (-not (Update-ListMenu)) { $e.Cancel = $true }
     })
 
     $Ui.ListMenu = $menu
     return $menu
+}
+
+function Update-ListMenu {
+    # The list's context menu for the selected entries: several are pasted as one plain text, and only one can be
+    # edited. Returns $false when no entry is selected (then there is no menu).
+    $entries = @(Get-SelectedEntries)
+    if ($entries.Count -eq 0) { return $false }
+
+    $entry = $entries[0]
+    $several = $entries.Count -gt 1
+    $verb = if ($State.PasteTarget -ne [IntPtr]::Zero) { 'Paste' } else { 'Copy' }
+    $Ui.ListMenuUse.Text = if ($several) { "$verb $($entries.Count) entries" } else { $verb }
+    $Ui.ListMenuPlain.Text = "$verb as plain text"
+    $Ui.ListMenuPlain.Visible = -not $several -and $entry.HasFormatting   # same as the normal paste otherwise
+    $allPinned = @($entries | Where-Object { -not $State.Pinned.Contains($_) }).Count -eq 0
+    $Ui.ListMenuPin.Text = if ($allPinned) { 'Unpin' } else { 'Pin to top' }
+    $Ui.ListMenuEdit.Visible = -not $several -and -not $entry.IsImage
+    $Ui.ListMenuRemove.Text = if ($several) { "Remove $($entries.Count) entries" } else { 'Remove' }
+    $Ui.ListMenuPreview.Checked = $State.PreviewVisible
+    $true
 }
 
 function Show-EditDialog {

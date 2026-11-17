@@ -166,7 +166,7 @@ function Receive-ClipboardChange {
     Update-TrayText
     if ($Ui.Form.Visible) {
         # Keep the same entry selected, not the same row: the new entry shifts the list.
-        Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry $selected
+        Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry $selected -KeepSelection
     }
 }
 
@@ -243,27 +243,41 @@ function Find-ClipboardEntry {
 }
 
 function Remove-ClipboardEntry {
-    param([PsClip.ClipEntry]$Entry)
+    # One entry or several (selected in the popup); the pinned entries are saved once.
+    param([PsClip.ClipEntry[]]$Entry)
 
-    if ($State.Pinned.Remove($Entry)) {
-        Save-PinnedList
+    $pinnedRemoved = $false
+    foreach ($item in $Entry) {
+        if ($State.Pinned.Remove($item)) {
+            $pinnedRemoved = $true
+        }
+        else {
+            [void]$State.History.Remove($item)
+        }
     }
-    else {
-        [void]$State.History.Remove($Entry)
-    }
+    if ($pinnedRemoved) { Save-PinnedList }
 }
 
 function Switch-ClipboardPin {
-    # Pinning appends the entry to the pinned group; unpinning moves it to the top of the history.
-    param([PsClip.ClipEntry]$Entry)
+    # One entry or several, in list order. Pins those not pinned yet - appended to the pinned group in that order;
+    # entries pinned before keep their place (and their Alt+number). If all are pinned already, unpins them: they
+    # move to the top of the history as a block, in that order - so pinning and unpinning keeps their order.
+    # The pinned entries are saved once.
+    param([PsClip.ClipEntry[]]$Entry)
 
-    if ($State.Pinned.Remove($Entry)) {
-        $State.History.Insert(0, $Entry)
-        Limit-ClipboardHistory
+    $toPin = @($Entry | Where-Object { -not $State.Pinned.Contains($_) })
+    if ($toPin.Count -gt 0) {
+        foreach ($item in $toPin) {
+            [void]$State.History.Remove($item)
+            $State.Pinned.Add($item)
+        }
     }
     else {
-        [void]$State.History.Remove($Entry)
-        $State.Pinned.Add($Entry)
+        for ($i = $Entry.Count - 1; $i -ge 0; $i--) {
+            [void]$State.Pinned.Remove($Entry[$i])
+            $State.History.Insert(0, $Entry[$i])
+        }
+        Limit-ClipboardHistory
     }
     Save-PinnedList
 }

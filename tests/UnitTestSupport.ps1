@@ -69,6 +69,23 @@ namespace PsClipTest
         }
     }
 
+    // A mouse message to a window - e.g. a click on a hidden list box: the list box's own handling and the
+    // events WinForms raises for it, without the real mouse.
+    public static class MouseMessage
+    {
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        static extern System.IntPtr SendMessage(System.IntPtr hwnd, int message, System.IntPtr wParam,
+            System.IntPtr lParam);
+
+        public const int LeftDown = 0x201, LeftUp = 0x202, LeftDoubleClick = 0x203;
+        public const int LeftButton = 0x1, Shift = 0x4, Control = 0x8;
+
+        public static void Send(System.IntPtr hwnd, int message, int keys, int x, int y)
+        {
+            SendMessage(hwnd, message, (System.IntPtr)keys, (System.IntPtr)((y << 16) | (x & 0xFFFF)));
+        }
+    }
+
     public static class FileLock
     {
         // Holds a file open without sharing for a while, released by another thread - like a virus scanner.
@@ -124,6 +141,11 @@ function Reset-TestState {
         Filtered            = [System.Collections.Generic.List[PsClip.ClipEntry]]::new()
         FilteredPinnedCount  = 0
         FoundCount           = 0
+        Selected             = [System.Collections.Generic.HashSet[PsClip.ClipEntry]]::new()
+        SelectionAnchor      = $null
+        SelectionBeforeClick = $null
+        ListClick            = $false
+        ListRefill           = $false
         MemoryLimit          = '100MB'
         MaxEntryLength       = 1000000
         OwnClipboardSequence = 0
@@ -189,6 +211,11 @@ function Get-Entry {
         if ($entry.Text -ceq $Text) { return $entry }
     }
     throw "No entry '$Text'"
+}
+
+function Get-SelectedTexts {
+    # The entries the popup's actions apply to (Get-SelectedEntries), as 'a|b|c'
+    @(Get-SelectedEntries | ForEach-Object { $_.Text }) -join '|'
 }
 
 function New-FormattedEntry {

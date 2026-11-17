@@ -11,12 +11,15 @@ Press the hotkey anywhere. The popup opens at the mouse pointer, or - with *Open
 | ------------------------------ | ------------------------------------------------ |
 | *type*                         | Filter - every word must match, case-insensitive; also searches the text in images |
 | `Up` / `Down`, `PgUp` / `PgDn` | Move the selection                               |
-| `Enter`, double-click          | Paste the entry into the window that was active, with its formatting |
+| `Shift+Up` / `Shift+Down`, `Shift+PgUp` / `Shift+PgDn` | Select several entries in a row (see [Several entries at once](#several-entries-at-once)) |
+| `Shift+click`, `Ctrl+click`    | Select the entries up to the clicked one / add or take out the clicked one (`Ctrl+Shift+click`: add those up to it) |
+| `Ctrl+A`                       | Select all entries shown - with a filter typed, the matches |
+| `Enter`, double-click          | Paste the entry into the window that was active, with its formatting; several: as plain text, oldest first, one per line |
 | `Shift+Enter`                  | Paste it as plain text                           |
 | `F3`                           | Show / hide the preview: full text or image, length, time copied |
 | `F2`                           | Edit the text in a window of its own; `Esc` saves and closes it (changed text loses its formatting) |
-| `Ctrl+P`                       | Pin / unpin the entry                            |
-| `Shift+Delete`                 | Remove the entry                                 |
+| `Ctrl+P`                       | Pin / unpin the selected entries                 |
+| `Shift+Delete`                 | Remove the selected entries                      |
 | `Alt+1` ... `Alt+9`, `Alt+0`   | Paste the entry with that number (the first ten rows are numbered); with `Shift` as plain text |
 | `Esc`, click elsewhere         | Close                                            |
 
@@ -24,6 +27,31 @@ Every entry shows two lines: line breaks stay, long text wraps and ends with "..
 is slightly shaded, and the words you filter by are highlighted. Right-click an entry for the same actions (*Paste as
 plain text* appears for entries with formatting). You can resize the popup while it is open; the next time it opens
 at the chosen size again (`-Size`: 6, 10 or 15 entries).
+
+## Several entries at once
+
+Select several entries with `Shift+Up` / `Shift+Down` (or `Shift+PgUp` / `Shift+PgDn`), `Shift+click`, `Ctrl+click`
+and `Ctrl+Shift+click`, or all entries shown with `Ctrl+A`; the status line says how many. Moving without `Shift`, a
+plain click or typing in the filter goes back to one entry. Then:
+
+- **`Enter`** - or a double-click on one of them - pastes them in one go as plain text, **oldest first** - in the order
+  you copied them - one per line.
+  Images among them are left out. The entries stay where they are in the list, and the combined text is not added as
+  a new entry. In Excel, the lines fill the cells below each other.
+- **`Ctrl+P`** pins those that are not pinned yet: they go to the end of the pinned entries in the order shown;
+  entries that were pinned already keep their place (and their `Alt+number`). If all of them are pinned, it unpins
+  them: they go to the top of the history, in the order shown - so pinning and unpinning keeps their order. A second
+  `Ctrl+P` on a selection of pinned and unpinned entries therefore unpins all of them.
+- **`Shift+Delete`** removes them.
+- **Right-click** one of them for the same actions; right-clicking an entry outside the selection selects that one
+  alone.
+
+`F2`, `F3` and `Alt+number` work on one entry: `F2` and the preview on the entry last moved to or clicked, `Alt+number`
+on the numbered one. In the preview, `Ctrl+A` selects its text, as before.
+
+Pinning works as a way to keep some of the history over a restart (with *Keep pinned entries* on): select the entries,
+`Ctrl+P`; after the restart select them again and `Ctrl+P` to unpin them. Until then they are saved on the disk like
+all pinned entries.
 
 ## Text in images
 

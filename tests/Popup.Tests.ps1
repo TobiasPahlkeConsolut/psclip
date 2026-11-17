@@ -95,6 +95,399 @@ Describe 'Update-PopupList' {
     }
 }
 
+function New-TestList {
+    # The list's real controls, never shown. Without window handles no events fire: the tests call the functions
+    # the event handlers call.
+    $script:Ui.Search = [System.Windows.Forms.TextBox]::new()
+    $script:Ui.List = [System.Windows.Forms.ListBox]::new()
+    $script:Ui.Status = [System.Windows.Forms.Label]::new()
+    $Ui.Status.Width = 2000   # wide enough for every hint
+}
+
+function Remove-TestList {
+    $Ui.Search.Dispose()
+    $Ui.List.Dispose()
+    $Ui.Status.Dispose()
+}
+
+Describe 'Selecting several rows' {
+    BeforeEach {
+        Reset-TestState
+        New-TestList
+        Add-Entries 'e1', 'e2', 'e3', 'e4', 'e5'   # rows 0 to 4: e5 ... e1
+        Update-PopupList
+    }
+
+    AfterEach { Remove-TestList }
+
+    It 'selects one row - the cursor row - until Shift or Ctrl is used' {
+        Get-SelectedTexts | Should BeExactly 'e5'
+        Move-Selection 2
+        Get-SelectedTexts | Should BeExactly 'e3'
+        $State.Selected.Count | Should Be 0
+    }
+
+    It 'adds rows with Shift+Down, takes them away with Shift+Up, and goes back to one row with Down' {
+        Move-Selection 1 -Extend
+        Move-Selection 1 -Extend
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+        $Ui.Status.Text | Should Match '^3 selected'
+        Move-Selection -1 -Extend
+        Get-SelectedTexts | Should BeExactly 'e5|e4'
+        $Ui.List.SelectedIndex | Should Be 1
+        Move-Selection 1
+        Get-SelectedTexts | Should BeExactly 'e3'
+        $Ui.Status.Text | Should Not Match 'selected'
+    }
+
+    It 'extends from the row where the Shift selection started, in both directions' {
+        Move-Selection 2   # e3
+        Move-Selection -1 -Extend
+        Move-Selection -1 -Extend
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+        Move-Selection 10 -Extend   # Shift+PgDn: to the last row, from e3 on
+        Get-SelectedTexts | Should BeExactly 'e3|e2|e1'
+        $Ui.List.SelectedIndex | Should Be 4
+    }
+
+    It 'selects all rows with Ctrl+A, and the cursor row stays' {
+        Move-Selection 1
+        Select-AllRows
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3|e2|e1'
+        $Ui.List.SelectedIndex | Should Be 1
+        $Ui.Status.Text | Should Match '^5 selected  .  5 of 5'
+    }
+
+    It 'selects only the rows shown with Ctrl+A - with a filter typed, the matches' {
+        Add-Entries 'apple 1', 'pear', 'apple 2'
+        $Ui.Search.Text = 'apple'
+        Update-PopupList
+        Select-AllRows
+        Get-SelectedTexts | Should BeExactly 'apple 2|apple 1'
+    }
+
+    It 'goes back to one row when the filter changes' {
+        Select-AllRows
+        $Ui.Search.Text = 'e'
+        Update-PopupList
+        $State.Selected.Count | Should Be 0
+        Get-SelectedTexts | Should BeExactly 'e5'
+    }
+
+    It 'keeps the selected rows when the list is refreshed in the background - e.g. a new copy arrives' {
+        Move-Selection 1 -Extend
+        Add-Entries 'new'
+        Update-PopupList -SelectIndex $Ui.List.SelectedIndex -SelectEntry (Get-SelectedEntry) -KeepSelection
+        Get-SelectedTexts | Should BeExactly 'e5|e4'
+        (Get-SelectedEntry).Text | Should BeExactly 'e4'
+        Move-Selection 1 -Extend   # still from e5 on
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+    }
+
+    It 'selects one row with a click, the rows up to a Shift+click, and adds or takes out rows with Ctrl+click' {
+        Select-ClickedRow 1 None
+        Get-SelectedTexts | Should BeExactly 'e4'
+        $Ui.List.SelectedIndex | Should Be 1
+        Select-ClickedRow 3 Shift
+        Get-SelectedTexts | Should BeExactly 'e4|e3|e2'
+        Select-ClickedRow 0 Control
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3|e2'
+        Select-ClickedRow 3 Control
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+        Select-ClickedRow 4 None
+        Get-SelectedTexts | Should BeExactly 'e1'
+    }
+
+    It 'keeps the row selected before a Ctrl+click, and one row always stays selected' {
+        Move-Selection 1   # e4, a single row
+        Select-ClickedRow 3 Control
+        Get-SelectedTexts | Should BeExactly 'e4|e2'
+        Select-ClickedRow 3 Control
+        Select-ClickedRow 1 Control
+        Get-SelectedTexts | Should BeExactly 'e4'   # the cursor row
+    }
+
+    It 'adds the rows up to a Ctrl+Shift+click to those selected' {
+        Select-ClickedRow 0 None
+        Select-ClickedRow 2 Control
+        Select-ClickedRow 4 'Control, Shift'   # from the Ctrl+clicked row on
+        Get-SelectedTexts | Should BeExactly 'e5|e3|e2|e1'
+    }
+
+    It 'selects only the row where a drag with the mouse button down ended - not with Ctrl' {
+        Select-ClickedRow 0 None
+        Select-ClickedRow 2 Shift
+        $Ui.List.SelectedIndex = 4   # what the list box itself does while dragging
+        Complete-MouseSelection Control
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+        Complete-MouseSelection None
+        Get-SelectedTexts | Should BeExactly 'e1'
+    }
+
+    It 'leaves one row selected when the cursor row leaves the selection some other way (list keys, Home/End)' {
+        Select-RowRange 0 2
+        $Ui.List.SelectedIndex = 1
+        Sync-ListSelection
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3'   # inside: stays
+        $Ui.List.SelectedIndex = 4
+        $State.ListClick = $true   # a click in progress: handled when the button went down
+        Sync-ListSelection
+        $State.ListClick = $false
+        $State.ListRefill = $true   # Update-PopupList keeps or resets the selection itself
+        Sync-ListSelection
+        $State.ListRefill = $false
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+        Sync-ListSelection
+        Get-SelectedTexts | Should BeExactly 'e1'
+        Move-Selection -1 -Extend   # and Shift goes on from there
+        Get-SelectedTexts | Should BeExactly 'e2|e1'
+    }
+
+    Context 'double-click' {
+        Mock Invoke-SelectedEntry { $script:pasted = Get-SelectedTexts }
+
+        It 'pastes all selected rows when a plain double-click lands on one of them' {
+            Select-RowRange 0 2
+            Start-ListClick 1 1 None   # first press of the double-click: only that row for now
+            Complete-MouseSelection None
+            Get-SelectedTexts | Should BeExactly 'e4'
+            Start-ListClick 1 2 None   # second press: changes nothing
+            Get-SelectedTexts | Should BeExactly 'e4'
+            Invoke-DoubleClickedEntry 1
+            $script:pasted | Should BeExactly 'e5|e4|e3'
+        }
+
+        It 'pastes only the double-clicked row when it was not one of several selected rows' {
+            Select-RowRange 0 2
+            Start-ListClick 4 1 None
+            Complete-MouseSelection None
+            Start-ListClick 4 2 None
+            Invoke-DoubleClickedEntry 4
+            $script:pasted | Should BeExactly 'e1'
+            Select-ClickedRow 1 None   # one row selected before the double-click: nothing kept
+            Start-ListClick 1 1 None
+            Complete-MouseSelection None
+            Start-ListClick 1 2 None
+            Invoke-DoubleClickedEntry 1
+            $script:pasted | Should BeExactly 'e4'
+        }
+    }
+
+    It 'opens the menu for the selection on a selected row, otherwise for the right-clicked row alone' {
+        Select-RowRange 0 2
+        Select-RowForMenu 1
+        Get-SelectedTexts | Should BeExactly 'e5|e4|e3'
+        $Ui.List.SelectedIndex | Should Be 1
+        Select-RowForMenu 4
+        Get-SelectedTexts | Should BeExactly 'e1'
+    }
+
+    Context 'Alt+number' {
+        Mock Invoke-SelectedEntry {}
+
+        It 'pastes only the numbered row' {
+            Select-AllRows
+            Invoke-NumberedEntry 3
+            Get-SelectedTexts | Should BeExactly 'e2'
+            Assert-MockCalled Invoke-SelectedEntry -Scope It -Exactly 1
+        }
+    }
+
+    It 'forgets the selection when the popup closes' {
+        $script:Ui.Form = [pscustomobject]@{ Visible = $false }
+        $script:Ui.PreviewInfo = [pscustomobject]@{ Text = '' }
+        $script:Ui.PreviewText = [pscustomobject]@{ Text = '' }
+        $script:Ui.PreviewImage = [pscustomobject]@{ Image = $null }
+        Select-AllRows
+        Hide-Popup
+        $State.Selected.Count | Should Be 0
+        $null -eq $State.SelectionAnchor | Should Be $true
+    }
+}
+
+Describe 'Pasting several entries' {
+    BeforeEach { Reset-TestState }
+
+    function New-CopiedEntry {
+        param([string]$Text, [string]$Copied)
+        $entry = [PsClip.ClipEntry]::new($Text)
+        $entry.Copied = [datetime]$Copied
+        $entry
+    }
+
+    It 'joins the texts oldest first - in the order they were copied - one per line' {
+        $entries = (New-CopiedEntry 'third' '10:03'), (New-CopiedEntry 'first' '10:01'),
+            (New-CopiedEntry 'second' '10:02')   # in list order
+        Join-EntryText $entries | Should BeExactly "first`r`nsecond`r`nthird"
+    }
+
+    It 'takes rows copied at the same time from the bottom of the list up' {
+        $entries = (New-CopiedEntry 'top' '10:00'), (New-CopiedEntry 'bottom' '10:00')
+        Join-EntryText $entries | Should BeExactly "bottom`r`ntop"
+    }
+
+    It 'drops line breaks at the end of a text, so that no empty lines come between - but keeps those inside' {
+        $entries = (New-CopiedEntry "two`r`n" '10:02'), (New-CopiedEntry "one`nline`n`n" '10:01')
+        Join-EntryText $entries | Should BeExactly "one`nline`r`ntwo"
+    }
+
+    It 'leaves images out, and gives nothing for images only' {
+        $image = New-ImageEntry
+        Join-EntryText @($image, (New-CopiedEntry 'text' '10:00')) | Should BeExactly 'text'
+        $null -eq (Join-EntryText @($image, (New-ImageEntry -Color Red))) | Should Be $true
+    }
+
+    Context 'from the list' {
+        Mock Set-ClipboardEntry {}
+        Mock Hide-Popup {}
+
+        It 'puts the joined text on the clipboard as plain text, and the entries stay where they are' {
+            New-TestList
+            Add-Entries 'one', 'two', 'three'
+            Update-PopupList
+            Select-AllRows
+            Invoke-SelectedEntry   # copy mode: no window to paste into
+            Assert-MockCalled Set-ClipboardEntry -Scope It -Exactly 1 -ParameterFilter {
+                $Entry.Text -ceq "one`r`ntwo`r`nthree" -and $PlainText -and -not $Entry.HasFormatting
+            }
+            $State.History -join '|' | Should BeExactly 'three|two|one'
+            Remove-TestList
+        }
+
+        It 'says so for several images instead of pasting' {
+            New-TestList
+            $script:Ui.Tray | Add-Member -MemberType ScriptMethod -Name ShowBalloonTip -Value {
+                param($timeout, $title, $text, $icon)
+                $this.Text = $text
+            }
+            Add-ClipboardEntry (New-ImageEntry)
+            Add-ClipboardEntry (New-ImageEntry -Color Red)
+            Update-PopupList
+            Select-AllRows
+            Invoke-SelectedEntry
+            Assert-MockCalled Set-ClipboardEntry -Scope It -Exactly 0
+            $Ui.Tray.Text | Should Match 'Several images'
+            Remove-TestList
+        }
+    }
+}
+
+Describe 'Pinning and unpinning several entries (Ctrl+P)' {
+    BeforeEach {
+        Reset-TestState
+        New-TestList
+        Add-Entries 'p1', 'p2', 'h1', 'h2', 'h3', 'h4', 'h5'
+        Switch-ClipboardPin (Get-Entry 'p1')
+        Switch-ClipboardPin (Get-Entry 'p2')
+        Update-PopupList   # rows: p1 p2 | h5 h4 h3 h2 h1
+    }
+
+    AfterEach { Remove-TestList }
+
+    It 'adds the selected rows to the end of the pinned group, in the order shown' {
+        Select-RowRange 2 4
+        Switch-SelectedPin
+        $State.Pinned -join '|' | Should BeExactly 'p1|p2|h5|h4|h3'
+        $State.History -join '|' | Should BeExactly 'h2|h1'
+    }
+
+    It 'does the same for rows apart (Ctrl+click)' {
+        Select-ClickedRow 2 None
+        Select-ClickedRow 4 Control
+        Select-ClickedRow 6 Control
+        Switch-SelectedPin
+        $State.Pinned -join '|' | Should BeExactly 'p1|p2|h5|h3|h1'
+        $State.History -join '|' | Should BeExactly 'h4|h2'
+    }
+
+    It 'leaves rows pinned already where they are (and their Alt+number), adding the others after the group' {
+        Select-ClickedRow 0 None   # p1
+        Select-ClickedRow 3 Control   # h4
+        Switch-SelectedPin
+        $State.Pinned -join '|' | Should BeExactly 'p1|p2|h4'
+    }
+
+    It 'unpins when all selected rows are pinned: to the top of the history, in the order shown' {
+        Select-RowRange 0 1
+        Switch-SelectedPin
+        $State.Pinned.Count | Should Be 0
+        $State.History -join '|' | Should BeExactly 'p1|p2|h5|h4|h3|h2|h1'
+    }
+
+    It 'gives back the order when pinning and unpinning the newest rows - the selection follows the entries' {
+        Move-Selection 2   # h5
+        Move-Selection 2 -Extend   # to h3
+        $cursor = Get-SelectedEntry
+        Switch-SelectedPin
+        Get-SelectedTexts | Should BeExactly 'h5|h4|h3'
+        [object]::ReferenceEquals((Get-SelectedEntry), $cursor) | Should Be $true
+        Switch-SelectedPin
+        $State.Pinned -join '|' | Should BeExactly 'p1|p2'
+        $State.History -join '|' | Should BeExactly 'h5|h4|h3|h2|h1'
+        Get-SelectedTexts | Should BeExactly 'h5|h4|h3'
+    }
+
+    It 'keeps the order of the selected rows among themselves for rows apart - not their place among the others' {
+        Select-ClickedRow 2 None
+        Select-ClickedRow 4 Control
+        Switch-SelectedPin
+        Switch-SelectedPin
+        $State.History -join '|' | Should BeExactly 'h5|h3|h4|h2|h1'
+    }
+
+    It 'unpins all of them - also those pinned before - when Ctrl+P is pressed twice on a mixed selection' {
+        Select-ClickedRow 0 None   # p1
+        Select-ClickedRow 3 Control   # h4
+        Switch-SelectedPin
+        Switch-SelectedPin
+        $State.Pinned -join '|' | Should BeExactly 'p2'
+        $State.History -join '|' | Should BeExactly 'p1|h4|h5|h3|h2|h1'
+    }
+
+    It 'saves the pinned entries once, not once per entry' {
+        Mock Save-PinnedList {}
+        Select-RowRange 2 6
+        Switch-SelectedPin
+        Assert-MockCalled Save-PinnedList -Scope It -Exactly 1
+        Switch-SelectedPin
+        Assert-MockCalled Save-PinnedList -Scope It -Exactly 2
+    }
+
+    It 'changes only the selected rows, never those hidden by the filter' {
+        Add-Entries 'apple 1', 'pear', 'apple 2'
+        $Ui.Search.Text = 'apple'
+        Update-PopupList
+        Select-AllRows
+        Switch-SelectedPin
+        $State.Pinned -join '|' | Should BeExactly 'p1|p2|apple 2|apple 1'
+        $State.History -join '|' | Should BeExactly 'pear|h5|h4|h3|h2|h1'
+    }
+}
+
+Describe 'Removing several entries (Shift+Delete)' {
+    BeforeEach {
+        Reset-TestState
+        New-TestList
+        Add-Entries 'p1', 'h1', 'h2', 'h3'
+        Switch-ClipboardPin (Get-Entry 'p1')
+        Update-PopupList   # rows: p1 | h3 h2 h1
+    }
+
+    AfterEach { Remove-TestList }
+
+    It 'removes all selected entries, saves the pinned ones once, and selects the row where they began' {
+        Mock Save-PinnedList {}
+        Mock Update-TrayText {}
+        Select-RowRange 0 2
+        Remove-SelectedEntry
+        $State.Pinned.Count | Should Be 0
+        $State.History -join '|' | Should BeExactly 'h1'
+        Assert-MockCalled Save-PinnedList -Scope It -Exactly 1
+        (Get-SelectedEntry).Text | Should BeExactly 'h1'
+        $State.Selected.Count | Should Be 0
+    }
+}
+
 Describe 'Get-PopupLocation' {
     $area = [System.Drawing.Rectangle]::new(0, 0, 1920, 1040)
     $size = [System.Drawing.Size]::new(560, 400)
@@ -302,6 +695,34 @@ Describe 'Invoke-PopupKey' {
         Mock Switch-SelectedPin {}
         Mock Remove-SelectedEntry {}
         Mock Switch-Preview {}
+        Mock Select-AllRows {}
+        $script:Ui.PreviewText = [pscustomobject]@{ Focused = $false }
+    }
+
+    It 'selects more rows with Shift and the arrow or page keys' {
+        Invoke-PopupKey (New-KeyEvent 'Shift, Down')
+        Invoke-PopupKey (New-KeyEvent 'Shift, PageUp')
+        Invoke-PopupKey (New-KeyEvent 'Down')
+        Assert-MockCalled Move-Selection -Scope It -Exactly 1 -ParameterFilter { $Delta -eq 1 -and $Extend }
+        Assert-MockCalled Move-Selection -Scope It -Exactly 1 -ParameterFilter { $Delta -eq -10 -and $Extend }
+        Assert-MockCalled Move-Selection -Scope It -Exactly 1 -ParameterFilter { $Delta -eq 1 -and -not $Extend }
+    }
+
+    It 'selects all rows with Ctrl+A - not in the preview, nor with AltGr, and a plain A goes to the filter box' {
+        $plain = New-KeyEvent 'A'
+        $altGr = New-KeyEvent 'Control, Alt, A'
+        Invoke-PopupKey $plain
+        Invoke-PopupKey $altGr
+        Invoke-PopupKey (New-KeyEvent 'Control, A')
+        Assert-MockCalled Select-AllRows -Scope It -Exactly 1
+        $plain.Handled | Should Be $false
+        $altGr.Handled | Should Be $false
+
+        $Ui.PreviewText.Focused = $true   # Ctrl+A there selects the preview's text
+        $inPreview = New-KeyEvent 'Control, A'
+        Invoke-PopupKey $inPreview
+        Assert-MockCalled Select-AllRows -Scope It -Exactly 1
+        $inPreview.Handled | Should Be $false
     }
 
     It 'switches the preview with F3' {

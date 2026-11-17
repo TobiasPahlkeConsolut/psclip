@@ -236,6 +236,10 @@ function Hide-Popup {
     $Ui.Search.Text = ''
     $Ui.List.Items.Clear()
     Clear-Preview
+    $State.Selected.Clear()
+    $State.SelectionAnchor = $null
+    $State.SelectionBeforeClick = $null
+    $State.ListClick = $false   # a click that closed the popup (double-click) ends without its MouseUp here
     $State.Filtered = [List[PsClip.ClipEntry]]::new()
     $State.FilteredPinnedCount = 0
     $State.FoundCount = 0
@@ -253,8 +257,10 @@ function Switch-Popup {
 
 function Update-PopupList {
     # Refills the list from the pinned entries and the history, applying the filter text. Selects
-    # SelectEntry if it is still shown, otherwise the row SelectIndex (clamped).
-    param([int]$SelectIndex = 0, $SelectEntry = $null)
+    # SelectEntry if it is still shown, otherwise the row SelectIndex (clamped). With -KeepSelection (pinning, a
+    # refresh in the background), rows selected with Shift/Ctrl stay selected if they are still shown; otherwise
+    # (typing in the filter) only that row is selected.
+    param([int]$SelectIndex = 0, $SelectEntry = $null, [switch]$KeepSelection)
 
     # Filtering and the list lines are done in C#: the history may hold many thousands of entries.
     # Filling a list box takes long with that many, so it shows only the first MaxListItems.
@@ -267,6 +273,13 @@ function Update-PopupList {
     if ($found.Count -gt $MaxListItems) { $found.RemoveRange($MaxListItems, $found.Count - $MaxListItems) }
     $State.Filtered = $found
     $State.FilteredPinnedCount = [Math]::Min($pinnedCount, $found.Count)
+    $previous = $State.Selected
+    $State.Selected = [HashSet[PsClip.ClipEntry]]::new()
+    if ($KeepSelection -and $previous.Count -gt 0) {
+        foreach ($entry in $found) {
+            if ($previous.Contains($entry)) { [void]$State.Selected.Add($entry) }
+        }
+    }
 
     $list = $Ui.List
     $list.BeginUpdate()
@@ -275,12 +288,26 @@ function Update-PopupList {
     $list.EndUpdate()
     if ($found.Count -gt 0) {
         $entryIndex = if ($null -ne $SelectEntry) { Find-ClipboardEntry $found $SelectEntry } else { -1 }
-        $list.SelectedIndex = if ($entryIndex -ge 0) {
+        $index = if ($entryIndex -ge 0) {
             $entryIndex
         }
         else {
             [Math]::Max(0, [Math]::Min($SelectIndex, $found.Count - 1))
         }
+        $anchorShown = $KeepSelection -and $null -ne $State.SelectionAnchor -and $found.Contains($State.SelectionAnchor)
+        if (-not $anchorShown) { $State.SelectionAnchor = $found[$index] }
+        # After Items.Clear, selecting the row always raises SelectedIndexChanged: Sync-ListSelection must not
+        # reset the selection kept above (the cursor row may be one taken out of it with Ctrl+click).
+        $State.ListRefill = $true
+        try {
+            $list.SelectedIndex = $index
+        }
+        finally {
+            $State.ListRefill = $false
+        }
+    }
+    else {
+        $State.SelectionAnchor = $null
     }
 
     Update-StatusText
@@ -301,6 +328,7 @@ function Update-StatusText {
         "$($State.Filtered.Count) of $total"
     }
     $parts = [List[string]]::new()
+    if ($State.Selected.Count -gt 1) { $parts.Add("$($State.Selected.Count) selected") }
     foreach ($part in $count, "Enter $action", 'Shift+Enter plain',
         'F3 preview', 'Ctrl+P pin', 'F2 edit', 'Shift+Del remove', "Alt+number $action") {
         $parts.Add($part)
@@ -318,26 +346,227 @@ function Update-StatusText {
 }
 
 function Move-Selection {
-    param([int]$Delta)
+    # Up/Down/PgUp/PgDn move the cursor row. With -Extend (Shift) the rows from the anchor - where the Shift
+    # selection started - to the new cursor row are selected; without, only the new cursor row.
+    param([int]$Delta, [switch]$Extend)
 
     $count = $Ui.List.Items.Count
     if ($count -eq 0) { return }
-    $Ui.List.SelectedIndex = [Math]::Max(0, [Math]::Min($count - 1, $Ui.List.SelectedIndex + $Delta))
+    $index = [Math]::Max(0, [Math]::Min($count - 1, $Ui.List.SelectedIndex + $Delta))
+    # The selection first: selecting the row checks it (Sync-ListSelection).
+    if ($Extend) {
+        Select-RowRange (Get-AnchorIndex) $index
+    }
+    elseif ($index -lt $State.Filtered.Count) {
+        Clear-ListSelection -Anchor $State.Filtered[$index]
+    }
+    $Ui.List.SelectedIndex = $index
 }
 
 function Get-SelectedEntry {
+    # The cursor row's entry: the one the preview shows, F2 edits and a right-click opens the menu for.
     $index = $Ui.List.SelectedIndex
     if ($index -lt 0 -or $index -ge $State.Filtered.Count) { return $null }
     $State.Filtered[$index]
 }
 
-function Invoke-SelectedEntry {
-    # Puts the selected entry on the clipboard - with its formatting unless -PlainText - and
-    # pastes it into the previously active window.
-    param([switch]$PlainText)
+function Get-SelectedEntries {
+    # The entries the actions apply to, in list order: the rows selected with Shift, Ctrl or Ctrl+A - else the
+    # cursor row.
+    if ($State.Selected.Count -eq 0) {
+        $entry = Get-SelectedEntry
+        if ($null -ne $entry) { $entry }
+        return
+    }
+    foreach ($entry in $State.Filtered) {
+        if ($State.Selected.Contains($entry)) { $entry }
+    }
+}
 
+function Get-AnchorIndex {
+    # The row a Shift selection starts from: where the last plain move or click went - else the cursor row.
+    $index = -1
+    if ($null -ne $State.SelectionAnchor) { $index = $State.Filtered.IndexOf($State.SelectionAnchor) }
+    if ($index -lt 0) { $index = $Ui.List.SelectedIndex }
+    $index
+}
+
+function Select-RowRange {
+    # Selects the rows from First to Last (in either order); -Add keeps the rows selected before (Ctrl+Shift+click).
+    param([int]$First, [int]$Last, [switch]$Add)
+
+    if (-not $Add) { $State.Selected.Clear() }
+    $from = [Math]::Max(0, [Math]::Min($First, $Last))
+    $to = [Math]::Min($State.Filtered.Count - 1, [Math]::Max($First, $Last))
+    for ($i = $from; $i -le $to; $i++) { [void]$State.Selected.Add($State.Filtered[$i]) }
+    Update-ListSelection
+}
+
+function Select-AllRows {
+    # Ctrl+A: every row shown - with a filter typed, the matches. The cursor row and the anchor stay.
+    if ($State.Filtered.Count -lt 2) { return }
+    foreach ($entry in $State.Filtered) { [void]$State.Selected.Add($entry) }
+    Update-ListSelection
+}
+
+function Clear-ListSelection {
+    # Back to a single selected row - the cursor row. Anchor: where the next Shift selection starts.
+    param($Anchor)
+
+    $wasSelected = $State.Selected.Count -gt 0
+    $State.Selected.Clear()
+    $State.SelectionAnchor = $Anchor
+    if ($wasSelected) { Update-ListSelection }
+}
+
+function Update-ListSelection {
+    # Shows a changed selection: the rows' backgrounds and the count in the status line.
+    $Ui.List.Invalidate()
+    Update-StatusText
+}
+
+function Sync-ListSelection {
+    # The cursor row changed (SelectedIndexChanged). The keys and clicks psclip handles set the selection before;
+    # any other change - e.g. Home/End while the list itself has the keyboard focus - to a row outside the
+    # selection leaves only that row selected. Not during a left click: the list box moves the cursor row when the
+    # button goes down, but reports it only when the button is released - after psclip has handled the click
+    # (Start-ListClick); nor while Update-PopupList selects the row.
+    if ($State.ListClick -or $State.ListRefill) { return }
     $entry = Get-SelectedEntry
     if ($null -eq $entry) { return }
+    if ($State.Selected.Count -gt 0 -and $State.Selected.Contains($entry)) { return }
+    Clear-ListSelection -Anchor $entry
+}
+
+function Get-ModifierKeys {
+    # Shift, Ctrl and Alt as held right now - a function of its own for the tests.
+    [Control]::ModifierKeys
+}
+
+function Start-ListClick {
+    # Left mouse button down on a row (MouseDown). Until it is released (Complete-MouseSelection), the list box's
+    # own selection change does not count (Sync-ListSelection). A plain click on one of several selected rows
+    # leaves only that row selected, but keeps the selection for a double-click (Invoke-DoubleClickedEntry); the
+    # second press of a double-click changes nothing.
+    param([int]$Index, [int]$Clicks, [Keys]$Modifiers)
+
+    $State.ListClick = $true
+    if ($Clicks -gt 1) { return }
+    $State.SelectionBeforeClick = $null
+    $plain = ($Modifiers -band ([Keys]::Shift -bor [Keys]::Control)) -eq 0
+    if ($plain -and $State.Selected.Count -gt 1 -and $Index -ge 0 -and $Index -lt $State.Filtered.Count -and
+        $State.Selected.Contains($State.Filtered[$Index])) {
+        $State.SelectionBeforeClick = [HashSet[PsClip.ClipEntry]]::new($State.Selected)
+    }
+    Select-ClickedRow $Index $Modifiers
+}
+
+function Invoke-DoubleClickedEntry {
+    # Double-click on a row: pastes it - or, if it was one of several selected rows, all of them (the first click
+    # of the double-click had left only this row selected).
+    param([int]$Index)
+
+    if ($Index -lt 0 -or $Index -ge $State.Filtered.Count) { return }
+    $before = $State.SelectionBeforeClick
+    $State.SelectionBeforeClick = $null
+    if ($null -ne $before -and $before.Contains($State.Filtered[$Index])) {
+        $State.Selected = $before
+        Update-ListSelection
+    }
+    Invoke-SelectedEntry
+}
+
+function Select-ClickedRow {
+    # A left click on a row (the list has made it the cursor row already). Shift: the rows from the anchor to it -
+    # with Ctrl added to those selected; Ctrl: adds the row or takes it out (one row always stays selected);
+    # otherwise only this row.
+    param([int]$Index, [Keys]$Modifiers)
+
+    if ($Index -lt 0 -or $Index -ge $State.Filtered.Count) { return }
+    if ($Ui.List.SelectedIndex -ne $Index) { $Ui.List.SelectedIndex = $Index }
+    $entry = $State.Filtered[$Index]
+    $shift = ($Modifiers -band [Keys]::Shift) -ne 0
+    $control = ($Modifiers -band [Keys]::Control) -ne 0
+    if ($shift) {
+        Select-RowRange (Get-AnchorIndex) $Index -Add:$control
+        return
+    }
+    if ($control) {
+        # From one selected row (the anchor is that row): it stays selected along with the clicked one.
+        $anchorIndex = Get-AnchorIndex
+        if ($State.Selected.Count -eq 0 -and $anchorIndex -ge 0) {
+            [void]$State.Selected.Add($State.Filtered[$anchorIndex])
+        }
+        if (-not $State.Selected.Remove($entry)) { [void]$State.Selected.Add($entry) }
+        $State.SelectionAnchor = $entry
+        Update-ListSelection
+        return
+    }
+    Clear-ListSelection -Anchor $entry
+}
+
+function Complete-MouseSelection {
+    # Left mouse button released (MouseUp): the click is over. Dragging with the button down moves the cursor row -
+    # out of the selection, only that row is selected then (not with Ctrl, which took the clicked row out of the
+    # selection on purpose).
+    param([Keys]$Modifiers)
+
+    $State.ListClick = $false
+    $entry = Get-SelectedEntry
+    if ($null -eq $entry) { return }
+    if ($State.Selected.Count -eq 0) {
+        $State.SelectionAnchor = $entry
+    }
+    elseif (-not $State.Selected.Contains($entry) -and ($Modifiers -band [Keys]::Control) -eq 0) {
+        Clear-ListSelection -Anchor $entry
+    }
+}
+
+function Select-RowForMenu {
+    # Right-click: the menu acts on the selection if the row is part of it, otherwise on this row alone.
+    param([int]$Index)
+
+    if ($Index -lt 0 -or $Index -ge $State.Filtered.Count) { return }
+    $entry = $State.Filtered[$Index]
+    if (-not $State.Selected.Contains($entry)) { Clear-ListSelection -Anchor $entry }
+    $Ui.List.SelectedIndex = $Index
+}
+
+function Join-EntryText {
+    # Several entries pasted at once: their texts as one plain text, one per line, oldest first - in the order they
+    # were copied (rows copied at the same time: from the bottom of the list up). Images are left out; line breaks
+    # at the end of a text are dropped, so that no empty lines come between. $null if there is no text.
+    param([PsClip.ClipEntry[]]$Entries)
+
+    $rows = for ($i = 0; $i -lt $Entries.Count; $i++) {
+        if (-not $Entries[$i].IsImage) { [pscustomobject]@{ Entry = $Entries[$i]; Row = $i } }
+    }
+    if ($null -eq $rows) { return $null }
+    $ordered = $rows | Sort-Object -Property @{ Expression = { $_.Entry.Copied } },
+        @{ Expression = { $_.Row }; Descending = $true }
+    @($ordered | ForEach-Object { $_.Entry.Text.TrimEnd("`r", "`n") }) -join "`r`n"
+}
+
+function Invoke-SelectedEntry {
+    # Puts the selected entry on the clipboard - with its formatting unless -PlainText - and
+    # pastes it into the previously active window. Several selected entries go as one plain text
+    # (Join-EntryText); they stay where they are in the list, and that text is not recorded (Set-ClipboardEntry).
+    param([switch]$PlainText)
+
+    $entries = @(Get-SelectedEntries)
+    if ($entries.Count -eq 0) { return }
+    $entry = $entries[0]
+    if ($entries.Count -gt 1) {
+        $text = Join-EntryText $entries
+        if ($null -eq $text) {
+            $Ui.Tray.ShowBalloonTip(4000, 'Clipboard history',
+                'Several images cannot be pasted at once - select one of them.', 'Info')
+            return
+        }
+        Write-Verbose "Pasting $($entries.Count) selected entries as one text ($($text.Length) chars)."
+        $entry = [PsClip.ClipEntry]::new($text)
+        $PlainText = $true
+    }
 
     $target = $State.PasteTarget
     try {
@@ -349,7 +578,7 @@ function Invoke-SelectedEntry {
             "Could not write to the clipboard: $($_.Exception.Message)", 'Warning')
         return
     }
-    Move-ClipboardEntryToTop $entry
+    if ($entries.Count -eq 1) { Move-ClipboardEntryToTop $entry }
 
     if ($target -eq [IntPtr]::Zero) {
         Hide-Popup   # copy mode
@@ -381,11 +610,15 @@ function Invoke-SelectedEntry {
 }
 
 function Switch-SelectedPin {
-    $entry = Get-SelectedEntry
-    if ($null -eq $entry) { return }
+    # Ctrl+P: pins the selected entries, or unpins them if all are pinned (Switch-ClipboardPin). The cursor row
+    # and the selection follow the entries.
+    $entries = @(Get-SelectedEntries)
+    if ($entries.Count -eq 0) { return }
 
-    Switch-ClipboardPin $entry
-    Update-PopupList -SelectEntry $entry
+    $cursor = Get-SelectedEntry
+    if ($null -eq $cursor) { $cursor = $entries[0] }
+    Switch-ClipboardPin $entries
+    Update-PopupList -SelectEntry $cursor -KeepSelection
 }
 
 function Edit-SelectedEntry {
@@ -410,11 +643,13 @@ function Edit-ClipboardEntry {
 }
 
 function Remove-SelectedEntry {
-    $entry = Get-SelectedEntry
-    if ($null -eq $entry) { return }
+    # Shift+Delete: removes the selected entries; the row where the first of them was is selected then.
+    $entries = @(Get-SelectedEntries)
+    if ($entries.Count -eq 0) { return }
 
-    $index = $Ui.List.SelectedIndex
-    Remove-ClipboardEntry $entry
+    $index = $State.Filtered.IndexOf($entries[0])
+    if ($index -lt 0) { $index = $Ui.List.SelectedIndex }
+    Remove-ClipboardEntry $entries
     Update-PopupList $index
     Update-TrayText
 }
@@ -430,14 +665,23 @@ function Invoke-PopupKey {
     switch ($KeyEvent.KeyCode) {
         ([Keys]::Escape) { Hide-Popup }
         ([Keys]::Enter) { Invoke-SelectedEntry -PlainText:$KeyEvent.Shift }
-        ([Keys]::Down) { Move-Selection 1 }
-        ([Keys]::Up) { Move-Selection -1 }
-        ([Keys]::PageDown) { Move-Selection $page }
-        ([Keys]::PageUp) { Move-Selection (-$page) }
+        ([Keys]::Down) { Move-Selection 1 -Extend:$KeyEvent.Shift }
+        ([Keys]::Up) { Move-Selection -1 -Extend:$KeyEvent.Shift }
+        ([Keys]::PageDown) { Move-Selection $page -Extend:$KeyEvent.Shift }
+        ([Keys]::PageUp) { Move-Selection (-$page) -Extend:$KeyEvent.Shift }
         ([Keys]::F2) { Edit-SelectedEntry }
         ([Keys]::F3) { Switch-Preview }
         ([Keys]::P) {
             if ($KeyEvent.Control) { Switch-SelectedPin } else { $handled = $false }
+        }
+        ([Keys]::A) {
+            # Ctrl+A selects all rows - but in the preview, its text (the preview's own handler); Ctrl+Alt is AltGr.
+            if ($KeyEvent.Control -and -not $KeyEvent.Alt -and -not $Ui.PreviewText.Focused) {
+                Select-AllRows
+            }
+            else {
+                $handled = $false
+            }
         }
         ([Keys]::Delete) {
             if ($KeyEvent.Shift) { Remove-SelectedEntry } else { $handled = $false }
@@ -477,6 +721,8 @@ function Invoke-NumberedEntry {
     param([int]$Row, [switch]$PlainText)
 
     if ($Row -lt 0 -or $Row -ge $Ui.List.Items.Count) { return }
+    $anchor = if ($Row -lt $State.Filtered.Count) { $State.Filtered[$Row] } else { $null }
+    Clear-ListSelection -Anchor $anchor   # this row alone, even if others were selected
     $Ui.List.SelectedIndex = $Row
     Invoke-SelectedEntry -PlainText:$PlainText
 }
@@ -493,7 +739,14 @@ function Write-ListItem {
     $colors = $State.Colors
     $graphics = $DrawEvent.Graphics
     $bounds = $DrawEvent.Bounds
-    $isSelected = ($DrawEvent.State -band [DrawItemState]::Selected) -ne 0
+    $entry = if ($index -lt $State.Filtered.Count) { $State.Filtered[$index] } else { $null }
+    # Several rows selected (Shift, Ctrl): psclip's own selection; else the list box's - the cursor row.
+    $isSelected = if ($State.Selected.Count -gt 0) {
+        $null -ne $entry -and $State.Selected.Contains($entry)
+    }
+    else {
+        ($DrawEvent.State -band [DrawItemState]::Selected) -ne 0
+    }
     $isPinned = $index -lt $State.FilteredPinnedCount
 
     $background = if ($isSelected) { $State.Gdi.SelBack } elseif ($index % 2 -eq 1) { $State.Gdi.Stripe }
@@ -521,7 +774,6 @@ function Write-ListItem {
 
     # Images: the thumbnail in front of the text
     $textLeft = $bounds.X + $Ui.TextIndent
-    $entry = if ($index -lt $State.Filtered.Count) { $State.Filtered[$index] } else { $null }
     if ($null -ne $entry -and $entry.IsImage -and $null -ne $entry.Thumbnail) {
         $thumbnail = $entry.Thumbnail
         $thumbnailTop = $bounds.Y + [int](($bounds.Height - $thumbnail.Height) / 2)

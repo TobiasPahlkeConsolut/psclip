@@ -120,7 +120,7 @@
     Runs in the current console and logs what happens (never the clipboard content itself).
 
 .NOTES
-    psclip 1.2.1 - https://github.com/TobiasPahlkeConsolut/psclip
+    psclip 1.3.0 - https://github.com/TobiasPahlkeConsolut/psclip
 
     Stop it via the tray menu (Exit). Other programs can stop it gracefully by posting WM_CLOSE
     to its hidden window titled 'PsClipboardManager' (the InstanceName).
@@ -200,7 +200,7 @@ if (-not ('PsClip.Native' -as [type])) {
 #region Settings
 
 # Also in .NOTES above and CHANGELOG.md (tests\Release.Tests.ps1 checks that they match)
-$PsClipVersion = '1.2.1'
+$PsClipVersion = '1.3.0'
 
 $Palettes = @{
     Dark  = @{
@@ -398,6 +398,11 @@ $State = @{
     Filtered             = [List[PsClip.ClipEntry]]::new()   # entries currently shown in the popup
     FilteredPinnedCount  = 0
     FoundCount           = 0                     # entries matching the filter (more than shown: MaxListItems)
+    Selected             = [HashSet[PsClip.ClipEntry]]::new()   # rows selected with Shift/Ctrl; empty = the cursor row
+    SelectionAnchor      = $null                 # the entry a Shift selection starts from
+    SelectionBeforeClick = $null                 # what a click on one of several selected rows replaced (double-click)
+    ListClick            = $false                # a left click on the list is in progress (button down until up)
+    ListRefill           = $false                # Update-PopupList is selecting the row (keeps the selection itself)
     MemoryLimit          = $startSettings.MaxMemory   # e.g. '100MB', a key of $MemoryLimits
     MaxEntryLength       = $startSettings.MaxEntryLength   # longer texts are not recorded
     OwnClipboardSequence = 0                     # sequence number of the clipboard change caused by pasting

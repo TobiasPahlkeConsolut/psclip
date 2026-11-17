@@ -77,6 +77,26 @@ Describe 'Text in images (OCR)' {
         }
     }
 
+    Context 'the popup is open when the text is recognized' {
+        Mock Update-PopupList {}
+        Mock Get-SelectedEntry { $script:cursorEntry }
+
+        It 'refreshes the list, keeping the cursor row and the selected rows' {
+            $script:cursorEntry = [PsClip.ClipEntry]::new('cursor')
+            $script:Ui.Form = [pscustomobject]@{ Visible = $true }
+            $script:Ui.List = [pscustomobject]@{ SelectedIndex = 2 }
+            $recognized = [System.Threading.Tasks.TaskCompletionSource[object]]::new()
+            $recognized.SetResult([pscustomobject]@{ Lines = @([pscustomobject]@{ Text = 'found' }) })
+            $entry = New-ImageEntry
+            $State.OcrJob = @{ Entry = $entry; Stage = 'Recognize'; Task = $recognized.Task }
+            Step-Ocr
+            $entry.OcrText | Should BeExactly 'found'
+            Assert-MockCalled Update-PopupList -Scope It -Exactly 1 -ParameterFilter {
+                $SelectIndex -eq 2 -and [object]::ReferenceEquals($SelectEntry, $script:cursorEntry) -and $KeepSelection
+            }
+        }
+    }
+
     It 'gives up on an image whose recognition failed (no text instead of "reading text...")' {
         $entry = New-ImageEntry
         $failed = [System.Threading.Tasks.Task]::FromException([InvalidOperationException]::new('test'))

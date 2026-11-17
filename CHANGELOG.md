@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.3.0 - 2026-11-17
+
+- **Select several entries**: `Shift+Up` / `Shift+Down` (also with `PgUp` / `PgDn`), `Shift+click`, `Ctrl+click`, and
+  `Ctrl+A` for all entries shown - with a filter typed, the matches. The status line shows how many are selected
+- `Enter` (or a double-click on one of them) pastes the selected entries in one go, as plain text, oldest first (in the
+  order you copied them), one per line; images among them are left out
+- `Ctrl+P` pins the selected entries - entries that were pinned already keep their place - or unpins them if all are
+  pinned; their order is kept either way. `Shift+Delete` removes them. The right-click menu does the same
+
 ## 1.2.1 - 2026-11-10
 
 - Every font looks as big as Segoe UI: it is sized to the same letter height (Fira Code looked a good deal bigger,

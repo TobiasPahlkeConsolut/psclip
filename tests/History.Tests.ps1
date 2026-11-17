@@ -243,13 +243,13 @@ Describe 'Receive-ClipboardChange' {
         Mock Update-PopupList {}
         Mock Get-SelectedEntry { $script:selected }
 
-        It 'refreshes the list and keeps the same entry selected - not the same row' {
+        It 'refreshes the list and keeps the same entry selected - not the same row - and the selected rows' {
             $script:selected = [PsClip.ClipEntry]::new('selected')
             $script:Ui.Form = [pscustomobject]@{ Visible = $true }
             $script:Ui.List = [pscustomobject]@{ SelectedIndex = 3 }
             Receive-ClipboardChange
             Assert-MockCalled Update-PopupList -Scope It -Exactly 1 -ParameterFilter {
-                $SelectIndex -eq 3 -and [object]::ReferenceEquals($SelectEntry, $script:selected)
+                $SelectIndex -eq 3 -and [object]::ReferenceEquals($SelectEntry, $script:selected) -and $KeepSelection
             }
         }
     }
