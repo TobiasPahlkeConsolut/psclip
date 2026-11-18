@@ -57,12 +57,13 @@ Describe 'Update-PopupList' {
         (Get-SelectedEntry).Text | Should BeExactly 'three'
     }
 
-    It 'says paste or copy depending on the target window' {
+    It 'says paste or copy depending on the target window - and Ctrl+C copy only when Enter pastes' {
         Update-PopupList
         $Ui.Status.Text | Should Match 'Enter copy'
+        $Ui.Status.Text | Should Not Match 'Ctrl\+C'
         $State.PasteTarget = [IntPtr]1
         Update-PopupList
-        $Ui.Status.Text | Should Match 'Enter paste'
+        $Ui.Status.Text | Should Match 'Enter paste.+Ctrl\+C copy'
     }
 
     It 'shows only the first MaxListItems entries, but finds all of them' {
@@ -351,6 +352,32 @@ Describe 'Pasting several entries' {
                 $Entry.Text -ceq "one`r`ntwo`r`nthree" -and $PlainText -and -not $Entry.HasFormatting
             }
             $State.History -join '|' | Should BeExactly 'three|two|one'
+            Remove-TestList
+        }
+
+        It 'only copies with Ctrl+C - no paste, no message - and closes, also with a window to paste into' {
+            New-TestList
+            $script:Ui.Tray | Add-Member -MemberType ScriptMethod -Name ShowBalloonTip -Value {
+                param($timeout, $title, $text, $icon)
+                $this.Text = $text
+            }
+            Add-Entries 'one', 'two', 'three'
+            Update-PopupList
+            $State.PasteTarget = [IntPtr]1   # not a window: nothing is brought to the front
+            Move-Selection 1
+            Invoke-SelectedEntry -CopyOnly
+            Assert-MockCalled Set-ClipboardEntry -Scope It -Exactly 1 -ParameterFilter {
+                $Entry.Text -ceq 'two' -and -not $PlainText
+            }
+            Assert-MockCalled Hide-Popup -Scope It -Exactly 1
+            $Ui.Tray.Text | Should BeExactly ''   # no "Not pasted" message
+            $State.History -join '|' | Should BeExactly 'two|three|one'   # used: to the top, like a paste
+
+            Select-AllRows
+            Invoke-SelectedEntry -CopyOnly
+            Assert-MockCalled Set-ClipboardEntry -Scope It -Exactly 1 -ParameterFilter {
+                $Entry.Text -ceq "one`r`ntwo`r`nthree" -and $PlainText
+            }
             Remove-TestList
         }
 
@@ -697,6 +724,33 @@ Describe 'Invoke-PopupKey' {
         Mock Switch-Preview {}
         Mock Select-AllRows {}
         $script:Ui.PreviewText = [pscustomobject]@{ Focused = $false }
+        $script:Ui.Search = [pscustomobject]@{ SelectionLength = 0 }
+    }
+
+    It 'copies the selected entries with Ctrl+C, as plain text with Ctrl+Shift+C - a plain C goes to the filter box' {
+        $plain = New-KeyEvent 'C'
+        $altGr = New-KeyEvent 'Control, Alt, C'
+        Invoke-PopupKey $plain
+        Invoke-PopupKey $altGr
+        Invoke-PopupKey (New-KeyEvent 'Control, C')
+        Invoke-PopupKey (New-KeyEvent 'Control, Shift, C')
+        Assert-MockCalled Invoke-SelectedEntry -Scope It -Exactly 1 -ParameterFilter { $CopyOnly -and -not $PlainText }
+        Assert-MockCalled Invoke-SelectedEntry -Scope It -Exactly 1 -ParameterFilter { $CopyOnly -and $PlainText }
+        $plain.Handled | Should Be $false
+        $altGr.Handled | Should Be $false
+    }
+
+    It 'leaves Ctrl+C to the preview and to text selected in the filter box - they copy that text' {
+        $Ui.PreviewText.Focused = $true
+        $inPreview = New-KeyEvent 'Control, C'
+        Invoke-PopupKey $inPreview
+        $Ui.PreviewText.Focused = $false
+        $Ui.Search.SelectionLength = 3
+        $inFilter = New-KeyEvent 'Control, C'
+        Invoke-PopupKey $inFilter
+        Assert-MockCalled Invoke-SelectedEntry -Scope It -Exactly 0
+        $inPreview.Handled | Should Be $false
+        $inFilter.Handled | Should Be $false
     }
 
     It 'selects more rows with Shift and the arrow or page keys' {

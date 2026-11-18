@@ -329,8 +329,9 @@ function Update-StatusText {
     }
     $parts = [List[string]]::new()
     if ($State.Selected.Count -gt 1) { $parts.Add("$($State.Selected.Count) selected") }
-    foreach ($part in $count, "Enter $action", 'Shift+Enter plain',
+    foreach ($part in $count, "Enter $action", 'Shift+Enter plain', 'Ctrl+C copy',
         'F3 preview', 'Ctrl+P pin', 'F2 edit', 'Shift+Del remove', "Alt+number $action") {
+        if ($part -eq 'Ctrl+C copy' -and $action -eq 'copy') { continue }   # Enter copies already
         $parts.Add($part)
     }
 
@@ -551,7 +552,8 @@ function Invoke-SelectedEntry {
     # Puts the selected entry on the clipboard - with its formatting unless -PlainText - and
     # pastes it into the previously active window. Several selected entries go as one plain text
     # (Join-EntryText); they stay where they are in the list, and that text is not recorded (Set-ClipboardEntry).
-    param([switch]$PlainText)
+    # -CopyOnly (Ctrl+C): only on the clipboard - the previous window comes back to the front, without keystrokes.
+    param([switch]$PlainText, [switch]$CopyOnly)
 
     $entries = @(Get-SelectedEntries)
     if ($entries.Count -eq 0) { return }
@@ -560,10 +562,10 @@ function Invoke-SelectedEntry {
         $text = Join-EntryText $entries
         if ($null -eq $text) {
             $Ui.Tray.ShowBalloonTip(4000, 'Clipboard history',
-                'Several images cannot be pasted at once - select one of them.', 'Info')
+                'Several images cannot be pasted or copied at once - select one of them.', 'Info')
             return
         }
-        Write-Verbose "Pasting $($entries.Count) selected entries as one text ($($text.Length) chars)."
+        Write-Verbose "Using $($entries.Count) selected entries as one text ($($text.Length) chars)."
         $entry = [PsClip.ClipEntry]::new($text)
         $PlainText = $true
     }
@@ -590,6 +592,11 @@ function Invoke-SelectedEntry {
     # really in front - never into another one; PasteInto checks that again right before sending.
     $pasted = $false
     $inFront = [PsClip.Native]::IsWindow($target) -and [PsClip.Native]::ForceForeground($target)
+    if ($CopyOnly) {
+        Hide-Popup
+        Write-Verbose "Copied to the clipboard; the previous window is in front: $inFront."
+        return
+    }
     if ($inFront) {
         Hide-Popup
         [PsClip.Native]::Wait(50)   # let the window settle; not Start-Sleep (see Native.Wait)
@@ -678,6 +685,17 @@ function Invoke-PopupKey {
             # Ctrl+A selects all rows - but in the preview, its text (the preview's own handler); Ctrl+Alt is AltGr.
             if ($KeyEvent.Control -and -not $KeyEvent.Alt -and -not $Ui.PreviewText.Focused) {
                 Select-AllRows
+            }
+            else {
+                $handled = $false
+            }
+        }
+        ([Keys]::C) {
+            # Ctrl+C copies the selected entries (Ctrl+Shift+C: as plain text) - but the preview's text, or text
+            # selected in the filter box, is copied by that text box itself.
+            $textSelected = $Ui.PreviewText.Focused -or $Ui.Search.SelectionLength -gt 0
+            if ($KeyEvent.Control -and -not $KeyEvent.Alt -and -not $textSelected) {
+                Invoke-SelectedEntry -CopyOnly -PlainText:$KeyEvent.Shift
             }
             else {
                 $handled = $false

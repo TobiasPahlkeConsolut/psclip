@@ -350,8 +350,15 @@ public static class TestNative
     // Presses the keys in order and releases them in reverse order (real keyboard input).
     public static void PressKeys(params byte[] keys)
     {
-        foreach (byte key in keys) keybd_event(key, 0, 0, UIntPtr.Zero);
-        for (int i = keys.Length - 1; i >= 0; i--) keybd_event(keys[i], 0, 2, UIntPtr.Zero);
+        foreach (byte key in keys) keybd_event(key, 0, ExtendedFlag(key), UIntPtr.Zero);
+        for (int i = keys.Length - 1; i >= 0; i--) keybd_event(keys[i], 0, ExtendedFlag(keys[i]) | 2, UIntPtr.Zero);
+    }
+
+    // The arrow keys, PgUp/PgDn, Home/End, Insert/Delete are extended keys. Without the flag Windows takes them
+    // for the number pad's - and with Num Lock on it then lets go of Shift: Shift+Down arrives as a plain Down.
+    static uint ExtendedFlag(byte key)
+    {
+        return (key >= 0x21 && key <= 0x28) || key == 0x2D || key == 0x2E ? 1u : 0u;
     }
 }
 '@

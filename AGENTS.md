@@ -174,7 +174,7 @@ features, quick install, key table, links.
 - Pasting: `Invoke-SelectedEntry` sets the clipboard, `ForceForeground`s the window that was active when the hotkey
   was pressed (while the popup is still open - hiding it first lets Windows activate another window), and
   `PsClip.Native.PasteInto` waits for released keys, checks the foreground again and sends Ctrl+V with one
-  `SendInput` call. With `-OpenAt TextCursor` (`$State.OpenAt`), `Show-Popup` asks `PsClip.Caret.Find` for the text
+  `SendInput` call. `Ctrl+C` (`Invoke-SelectedEntry -CopyOnly`) stops after bringing that window back: no keys. With `-OpenAt TextCursor` (`$State.OpenAt`), `Show-Popup` asks `PsClip.Caret.Find` for the text
   cursor of that window before the popup takes the focus: the system caret (`GetGUIThreadInfo`), else the
   accessible caret object (`OBJID_CARET`, browsers and Electron apps; skipped for hung windows, as asking waits);
   `Get-PopupLocation` places the popup below it, above it at the screen's bottom, or at the mouse pointer. Never send keystrokes without such a foreground check - also not in tests or ad-hoc diagnostic

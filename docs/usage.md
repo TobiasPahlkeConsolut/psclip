@@ -16,6 +16,7 @@ Press the hotkey anywhere. The popup opens at the mouse pointer, or - with *Open
 | `Ctrl+A`                       | Select all entries shown - with a filter typed, the matches |
 | `Enter`, double-click          | Paste the entry into the window that was active, with its formatting; several: as plain text, oldest first, one per line |
 | `Shift+Enter`                  | Paste it as plain text                           |
+| `Ctrl+C`                       | Only copy it to the clipboard - the popup closes and the window you were in comes back, without pasting; paste it with `Ctrl+V` whenever you like. `Ctrl+Shift+C`: as plain text |
 | `F3`                           | Show / hide the preview: full text or image, length, time copied |
 | `F2`                           | Edit the text in a window of its own; `Esc` saves and closes it (changed text loses its formatting) |
 | `Ctrl+P`                       | Pin / unpin the selected entries                 |
@@ -35,7 +36,7 @@ and `Ctrl+Shift+click`, or all entries shown with `Ctrl+A`; the status line says
 plain click or typing in the filter goes back to one entry. Then:
 
 - **`Enter`** - or a double-click on one of them - pastes them in one go as plain text, **oldest first** - in the order
-  you copied them - one per line.
+  you copied them - one per line. **`Ctrl+C`** puts that text on the clipboard instead, to paste it yourself.
   Images among them are left out. The entries stay where they are in the list, and the combined text is not added as
   a new entry. In Excel, the lines fill the cells below each other.
 - **`Ctrl+P`** pins those that are not pinned yet: they go to the end of the pinned entries in the order shown;

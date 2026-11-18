@@ -373,6 +373,10 @@ function New-ListMenu {
     $Ui.ListMenuPlain.ShortcutKeyDisplayString = 'Shift+Enter'
     $Ui.ListMenuPlain.add_Click({ Invoke-SelectedEntry -PlainText })
 
+    $Ui.ListMenuCopy = $menu.Items.Add('Copy')
+    $Ui.ListMenuCopy.ShortcutKeyDisplayString = 'Ctrl+C'
+    $Ui.ListMenuCopy.add_Click({ Invoke-SelectedEntry -CopyOnly })
+
     $Ui.ListMenuPin = $menu.Items.Add('Pin to top')
     $Ui.ListMenuPin.ShortcutKeyDisplayString = 'Ctrl+P'
     $Ui.ListMenuPin.add_Click({
@@ -416,14 +420,18 @@ function Update-ListMenu {
 
     $entry = $entries[0]
     $several = $entries.Count -gt 1
-    $verb = if ($State.PasteTarget -ne [IntPtr]::Zero) { 'Paste' } else { 'Copy' }
-    $Ui.ListMenuUse.Text = if ($several) { "$verb $($entries.Count) entries" } else { $verb }
+    $pasting = $State.PasteTarget -ne [IntPtr]::Zero
+    $verb = if ($pasting) { 'Paste' } else { 'Copy' }
+    $count = if ($several) { " $($entries.Count) entries" } else { '' }
+    $Ui.ListMenuUse.Text = "$verb$count"
     $Ui.ListMenuPlain.Text = "$verb as plain text"
     $Ui.ListMenuPlain.Visible = -not $several -and $entry.HasFormatting   # same as the normal paste otherwise
+    $Ui.ListMenuCopy.Text = "Copy$count"
+    $Ui.ListMenuCopy.Visible = $pasting   # opened from the tray icon, the first item copies already
     $allPinned = @($entries | Where-Object { -not $State.Pinned.Contains($_) }).Count -eq 0
     $Ui.ListMenuPin.Text = if ($allPinned) { 'Unpin' } else { 'Pin to top' }
     $Ui.ListMenuEdit.Visible = -not $several -and -not $entry.IsImage
-    $Ui.ListMenuRemove.Text = if ($several) { "Remove $($entries.Count) entries" } else { 'Remove' }
+    $Ui.ListMenuRemove.Text = "Remove$count"
     $Ui.ListMenuPreview.Checked = $State.PreviewVisible
     $true
 }

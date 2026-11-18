@@ -237,6 +237,25 @@ try {
     Add-Result 'Shift+Down selects two rows, Enter pastes both, oldest first' $severalPasted `
         "expected: '$severalExpected', target text: '$($targetBox.Text)'$severalClipboard"
 
+    # --- Ctrl+C only copies: the popup closes, the window comes back, nothing is pasted ---
+    $targetBox.Clear()
+    $ctrlCExpected = $null
+    if ([TestNative]::Activate($target.Handle) -and (Show-TestPopup)) {
+        $ctrlCExpected = @([TestNative]::ListBoxItems($listBox))[1]
+        Send-PostedKey $searchBox $keyDown   # -> row 1
+        Wait-Milliseconds 200
+        if (Test-Foreground $popup) { [TestNative]::PressKeys(0x11, 0x43) }   # real Ctrl+C
+    }
+    $ctrlCCopied = $ctrlCExpected -and (Wait-Until { (Get-Clipboard -Raw) -ceq $ctrlCExpected })
+    $ctrlCClosed = Wait-Until { -not [TestNative]::IsWindowVisible($popup) }
+    $ctrlCBack = Test-Foreground $target.Handle
+    $frontProcess = Get-Process -Id ([TestNative]::ProcessOf([TestNative]::GetForegroundWindow())) -ErrorAction Ignore
+    $frontName = if ($frontProcess) { $frontProcess.ProcessName } else { 'none' }
+    Add-Result 'Ctrl+C only copies the entry: popup closed, window back, nothing pasted' `
+        ($ctrlCCopied -and $ctrlCClosed -and $ctrlCBack -and $targetBox.Text -eq '') `
+        ("clipboard: '$(Get-Clipboard -Raw)', expected: '$ctrlCExpected', closed: $ctrlCClosed, " +
+        "test window in front: $ctrlCBack (in front: $frontName), target text: '$($targetBox.Text)'")
+
     # --- formatting: Enter pastes with formatting, Shift+Enter as plain text ---
     $boldText = 'psclip test: bold'
     $formatted = [DataObject]::new()

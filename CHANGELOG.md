@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0 - 2026-11-18
+
+- `Ctrl+C` in the popup only copies the selected entries to the clipboard, without pasting: the popup closes, the
+  window you were in comes back, and you paste with `Ctrl+V` when you like (`Ctrl+Shift+C`: as plain text). Several
+  entries are copied like `Enter` pastes them. Also in the right-click menu. In the preview, and with text selected in
+  the filter box, `Ctrl+C` still copies that text
+
 ## 1.3.0 - 2026-11-17
 
 - **Select several entries**: `Shift+Up` / `Shift+Down` (also with `PgUp` / `PgDn`), `Shift+click`, `Ctrl+click`, and

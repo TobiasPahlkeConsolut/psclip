@@ -135,6 +135,17 @@ Describe 'Popup window and tray menu, built hidden (never shown)' {
         $Ui.ListMenuEdit.Available | Should Be $false
         $Ui.ListMenuPin.Text | Should BeExactly 'Pin to top'   # not all of them are pinned
         $Ui.ListMenuRemove.Text | Should BeExactly 'Remove 3 entries'
+        $Ui.ListMenuCopy.Available | Should Be $false   # opened from the tray icon: the first item copies
+        $State.PasteTarget = [IntPtr]1
+        try {
+            Update-ListMenu | Should Be $true
+            $Ui.ListMenuUse.Text | Should BeExactly 'Paste 3 entries'
+            $Ui.ListMenuCopy.Text | Should BeExactly 'Copy 3 entries'
+            $Ui.ListMenuCopy.Available | Should Be $true
+        }
+        finally {
+            $State.PasteTarget = [IntPtr]::Zero
+        }
 
         Clear-ListSelection
         Update-ListMenu | Should Be $true

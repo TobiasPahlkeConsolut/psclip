@@ -31,7 +31,7 @@ Needs Windows 10 or 11 with Windows PowerShell 5.1, which comes with Windows. Do
 folder:
 
 ```powershell
-Expand-Archive .\psclip-1.3.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
+Expand-Archive .\psclip-1.4.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
 cd $env:LOCALAPPDATA\tools\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
@@ -51,6 +51,7 @@ Press the hotkey anywhere:
 | `Shift` + those keys, `Shift+click`, `Ctrl+click`, `Ctrl+A` | Select several entries (`Ctrl+A`: all shown) |
 | `Enter`, double-click          | Paste the entry into the window that was active, with its formatting - several: as plain text, oldest first, one per line |
 | `Shift+Enter`                  | Paste it as plain text                           |
+| `Ctrl+C`                       | Only copy the selected entries to the clipboard and close - paste them yourself with `Ctrl+V` |
 | `Alt+1` ... `Alt+9`, `Alt+0`   | Paste the entry with that number                 |
 | `F3`                           | Show / hide the preview                          |
 | `F2`                           | Edit the text (`Esc` saves)                      |
