@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.1 - 2026-11-20
+
+- Documentation changes
+
 ## 1.4.0 - 2026-11-18
 
 - `Ctrl+C` in the popup only copies the selected entries to the clipboard, without pasting: the popup closes, the
@@ -89,6 +93,5 @@ rights, and nothing written to disk unless you ask for it.
 - **Keep pinned entries** (optional): pinned entries survive restarts, saved encrypted for your Windows account
 - Dark and light theme, three popup sizes, hotkey and settings in the tray menu
 - Skips content that password managers mark as private
-- **Keep awake** (optional, unrelated to the clipboard): presses F15 when you have been idle for 30 seconds
 - `Install.ps1` creates Start menu and autostart shortcuts, with a memory limit of 500 MB, the popup at the text
   cursor and *Keep pinned entries* on unless you choose otherwise; Windows PowerShell 5.1 only

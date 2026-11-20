@@ -10,7 +10,7 @@ psclip needs Windows 10 or 11 with Windows PowerShell 5.1, which comes with Wind
 then in a PowerShell window in your Downloads folder:
 
 ```powershell
-Expand-Archive .\psclip-1.4.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
+Expand-Archive .\psclip-1.4.1.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
 cd $env:LOCALAPPDATA\tools\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
@@ -46,7 +46,7 @@ only be read on the computer that saved them.
 Settings given to `Install.ps1` go into `settings.ini`:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -KeepAwake
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L
 ```
 
 Afterwards, change settings in psclip's tray menu - it saves them to `settings.ini` - or in the file itself (*Edit

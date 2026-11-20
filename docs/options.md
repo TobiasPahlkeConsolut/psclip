@@ -20,8 +20,6 @@ defaults** for a new `settings.ini`: `MaxMemory = 500MB`, `OpenAt = TextCursor` 
 | `MaxMemory`         | `100MB`  | Memory the history may use: `100MB`, `500MB` or `1GB` (pinned entries count, but are never dropped) |
 | `KeepPinned`        | off      | *Keep pinned entries*: pinned entries survive restarts, encrypted (see [Keeping pinned entries](usage.md#keeping-pinned-entries)) |
 | `Preview`           | off      | Open the popup with the preview (`F3`) shown                                |
-| `KeepAwake`         | off      | *Keep awake* switched on                                                    |
-| `KeepAwakeSeconds`  | `30`     | Idle seconds (1 to 3600) before *Keep awake* presses F15                    |
 | `MaxEntryLength`    | `1000000`| Texts with more characters are not recorded                                 |
 | `-InstanceName`     | `PsClipboardManager` | Parameter only: to run a second, separate instance (the end-to-end test does) |
 
@@ -37,7 +35,7 @@ Size = M
 # Where the hotkey opens the popup: Mouse (at the mouse pointer) or TextCursor (below the text cursor)
 OpenAt = TextCursor
 
-KeepAwake = true
+Theme = Light
 ```
 
 - **Saved changes apply at once** - no restart needed (which would cost the history). A new hotkey that another

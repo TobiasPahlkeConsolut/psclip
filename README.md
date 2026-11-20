@@ -22,7 +22,6 @@ in a text file.
   line, or to pin or remove them together
 - Dark or light, three sizes, a choice of fonts; settings in the tray menu and in a simple text file
   (`settings.ini`); skips what password managers mark as private
-- **Keep awake** (optional, unrelated to the clipboard): keeps the session from going idle
 
 ## Install
 
@@ -31,7 +30,7 @@ Needs Windows 10 or 11 with Windows PowerShell 5.1, which comes with Windows. Do
 folder:
 
 ```powershell
-Expand-Archive .\psclip-1.4.0.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
+Expand-Archive .\psclip-1.4.1.zip -DestinationPath $env:LOCALAPPDATA\tools   # creates ...\tools\psclip
 cd $env:LOCALAPPDATA\tools\psclip
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Autostart
 ```
@@ -64,7 +63,7 @@ Right-click an entry for the same actions, and the tray icon (a small blue clipb
 ## Documentation
 
 - [Install, update, uninstall](docs/install.md) - with git, what `Install.ps1` does, the execution policy
-- [Usage](docs/usage.md) - popup, text in images, preview, editing, tray menu, keep awake, keeping pinned entries
+- [Usage](docs/usage.md) - popup, text in images, preview, editing, tray menu, keeping pinned entries
 - [Options](docs/options.md) - all settings and their defaults, the settings file, hotkeys
 - [Limitations](docs/limitations.md)
 - [Development](docs/development.md) - how it works, tests, releases

@@ -10,7 +10,7 @@ agents, but just as useful for people.
 | File                   | Content                                                                      |
 | ---------------------- | ---------------------------------------------------------------------------- |
 | `ClipboardManager.ps1` | The app's entry point: help, parameters, settings, startup                   |
-| `src/*.ps1`            | The app's functions by topic: hotkey, history, popup, theme, OCR, keep awake, windows, settings file |
+| `src/*.ps1`            | The app's functions by topic: hotkey, history, popup, theme, OCR, windows, settings file |
 | `src/*.cs`             | C# helpers for Windows APIs PowerShell cannot call directly                  |
 | `Install.ps1`          | Start menu / autostart shortcuts, `settings.ini`                             |
 | `tests/`               | Unit tests and the end-to-end test                                           |

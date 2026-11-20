@@ -32,23 +32,19 @@
     the bar between an image and its text. Sizes and F3 are reset when the popup opens again.
     Left-click the tray icon to open the history in copy-only mode; right-click it for "Clear
     history", the settings (hotkey, dark mode, window size, font, where the popup opens, memory
-    limit, keeping pinned entries, keep awake), "Edit settings file..." and "Exit". Settings changed there
+    limit, keeping pinned entries), "Edit settings file..." and "Exit". Settings changed there
     last until the script exits - unless there is a settings file.
 
     Settings file: when settings.ini exists next to this script (Install.ps1 creates it, and so does
     "Edit settings file..."), psclip reads its settings from it and saves the tray menu's changes to
     it; saving it in an editor applies the changes at once. It holds a line "Name = value" for each
-    of the parameters Hotkey, Theme, Size, Font, OpenAt, MaxMemory, KeepPinned, Preview, KeepAwake,
-    KeepAwakeSeconds and MaxEntryLength, e.g. "Theme = Light" or "KeepAwake = true". Parameters
-    given on the command line win over the file.
+    of the parameters Hotkey, Theme, Size, Font, OpenAt, MaxMemory, KeepPinned, Preview and
+    MaxEntryLength, e.g. "Theme = Light" or "Preview = true". Parameters given on the command line
+    win over the file.
 
     Entries that the source application marks as private (password managers set the
     ExcludeClipboardContentFromMonitorProcessing / CanIncludeInClipboardHistory formats) are
     not recorded, nor are texts longer than MaxEntryLength.
-
-    Unrelated to the clipboard: "Keep awake" in the tray menu (off by default) presses the
-    F15 key - which no program uses - whenever there has been no mouse or keyboard input for
-    KeepAwakeSeconds, so Windows does not consider the session idle.
 
 .PARAMETER Hotkey
     Global hotkey, e.g. 'Ctrl+Shift+V', 'Ctrl+Alt+H' or 'Ctrl+F12'. The key part is a
@@ -91,12 +87,6 @@
     Open the popup with the preview shown. F3 switches it while the popup is open; the next time
     the popup opens, it starts this way again.
 
-.PARAMETER KeepAwake
-    Start with "Keep awake" switched on (it can be switched in the tray menu).
-
-.PARAMETER KeepAwakeSeconds
-    Seconds without mouse or keyboard input after which "Keep awake" presses the F15 key.
-
 .PARAMETER KeepPinned
     Start with "Keep pinned entries" switched on (it can be switched in the tray menu): the pinned
     entries are saved to the file pinned.dat next to this script whenever they change, and loaded
@@ -120,7 +110,7 @@
     Runs in the current console and logs what happens (never the clipboard content itself).
 
 .NOTES
-    psclip 1.4.0 - https://github.com/TobiasPahlkeConsolut/psclip
+    psclip 1.4.1 - https://github.com/TobiasPahlkeConsolut/psclip
 
     Stop it via the tray menu (Exit). Other programs can stop it gracefully by posting WM_CLOSE
     to its hidden window titled 'PsClipboardManager' (the InstanceName).
@@ -200,7 +190,7 @@ if (-not ('PsClip.Native' -as [type])) {
 #region Settings
 
 # Also in .NOTES above and CHANGELOG.md (tests\Release.Tests.ps1 checks that they match)
-$PsClipVersion = '1.4.0'
+$PsClipVersion = '1.4.1'
 
 $Palettes = @{
     Dark  = @{

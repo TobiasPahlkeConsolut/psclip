@@ -97,7 +97,6 @@ The tray icon is a small blue clipboard, possibly in the `^` overflow area of th
     entries right away
   - *Keep pinned entries* - on / off: save the pinned entries for the next start (see
     [Keeping pinned entries](#keeping-pinned-entries))
-  - *Keep awake* - on / off (off by default)
   - *Edit settings file...* - opens `settings.ini` (see [Settings file](options.md#settings-file))
   - *Exit*
 
@@ -106,13 +105,6 @@ Without that file (`ClipboardManager.ps1` started by itself), they last until ps
 creates it.
 
 <br clear="right">
-
-## Keep awake
-
-Has nothing to do with the clipboard - it replaces a separate "mouse mover" tool. When switched on, psclip checks
-every second how long there has been no mouse or keyboard input; after 30 seconds (`-KeepAwakeSeconds`) it presses
-the **F15** key, which no keyboard has and no program uses (unlike Pause, which freezes the output of console
-windows). Windows then never sees the session as idle. While you are working, nothing is sent.
 
 ## Keeping pinned entries
 

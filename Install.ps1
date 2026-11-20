@@ -44,12 +44,6 @@
 .PARAMETER Preview
     Written to settings.ini: open the popup with the preview (F3) shown.
 
-.PARAMETER KeepAwake
-    Written to settings.ini: "Keep awake" switched on.
-
-.PARAMETER KeepAwakeSeconds
-    Written to settings.ini: idle seconds before "Keep awake" presses F15 (default 30).
-
 .PARAMETER KeepPinned
     Written to settings.ini: "Keep pinned entries" switched on - pinned entries are saved encrypted
     to pinned.dat in this folder and survive restarts. On by default here; -KeepPinned:$false
@@ -65,7 +59,7 @@
     .\Install.ps1 -Autostart
 
 .EXAMPLE
-    .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L -KeepAwake
+    .\Install.ps1 -Autostart -Hotkey 'Ctrl+Alt+V' -Theme Light -Size L
 
 .EXAMPLE
     .\Install.ps1 -MaxMemory 100MB -OpenAt Mouse -KeepPinned:$false
