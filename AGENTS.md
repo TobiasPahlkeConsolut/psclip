@@ -17,7 +17,6 @@ features, quick install, key table, links.
 | `src/Popup.ps1`                   | Popup behavior: show/hide, filtered list, keys, preview, status line |
 | `src/Theme.ps1`                   | Dark and light mode                                                  |
 | `src/Ocr.ps1`                     | Text in images (Windows.Media.Ocr), in the background                |
-| `src/KeepAwake.ps1`               | Keep awake (unrelated to the clipboard)                              |
 | `src/Window.ps1`                  | Building the popup window, the menus and the tray icon               |
 | `src/Settings.ps1`                | The settings file `settings.ini`: reading, saving, applying changes (also used by `Install.ps1`) |
 | `src/*.cs`                        | C# helpers, compiled together with `Add-Type`: `Native` (Win32 calls), `ClipboardHost` (hidden window), `ClipEntry`, `MenuRenderer`, `Caret` (text cursor of another program), `PinnedStore` (the `-KeepPinned` file), `SafeFile` (writing psclip's files safely), `ListPainter` (row text, highlights) |
@@ -80,7 +79,7 @@ features, quick install, key table, links.
   `Install.ps1` itself). The end-to-end test starts its own instance via `-InstanceName` (separate mutex and hidden
   window) and must only ever find and close windows of its own process id.
 - **State lives in two script-level hashtables:** `$State` (history, pinned entries, filter result, paste target,
-  hotkey, theme, size, keep awake) and `$Ui` (controls, fonts, metrics, timer, `ClipHost`, `AppContext`).
+  hotkey, theme, size) and `$Ui` (controls, fonts, metrics, timer, `ClipHost`, `AppContext`).
   Functions read and mutate them directly; the unit tests replace them with stand-ins (`Reset-TestState`).
 - **Entries are `PsClip.ClipEntry` objects** (C#): `Text` plus optional `Html` / `Rtf`, or an image (`Png` bytes,
   `Width`, `Height`, `Thumbnail`; `Text` is null - use `ListText` / `SearchText`). Lists hold the
@@ -127,8 +126,8 @@ features, quick install, key table, links.
   instances), one `Name = value` per line, `#`/`;` comments. Every setting is a parameter of the same name and values
   (`$SettingDefinitions`: type, choices/range, the comment written above it in a new file; `Settings.Tests.ps1`
   compares them with the `param()` attributes). At startup `Get-StartSettings` takes the command line
-  (`$PSBoundParameters`) over the file over the defaults; `$State` then holds every setting (also `KeepAwakeSeconds`
-  and `MaxEntryLength`). Values are kept in the file's form (`ConvertFrom-SettingText`: canonical case, `$true`/
+  (`$PSBoundParameters`) over the file over the defaults; `$State` then holds every setting (also `MaxEntryLength`).
+  Values are kept in the file's form (`ConvertFrom-SettingText`: canonical case, `$true`/
   `$false`, ints, the hotkey as `[Keys]` names via `Format-HotkeySetting` - never the layout-dependent
   `HotkeyText`). The tray menu calls `Save-Setting <Name>` after a change: only if the file exists, it rewrites just
   that setting's line(s) (`Set-SettingLine`), so the user's comments and order stay. A `FileSystemWatcher`
@@ -162,7 +161,7 @@ features, quick install, key table, links.
   `$State`, script-level variables, functions and their own parameters - never local variables of the
   constructing function. (Exception: `Show-HotkeyDialog`, whose handlers run inside `ShowDialog()`.)
 - PowerShell variable names are case-insensitive: never name a local variable `$state`, `$ui`, `$size`, `$theme`,
-  `$hotkey`, `$keepAwake` or `$font` (they would shadow `$State`, `$Ui` or the script parameters). Where the app is
+  `$hotkey` or `$font` (they would shadow `$State`, `$Ui` or the script parameters). Where the app is
   dot-sourced into a script's scope (the tests), `$font = [Font]...` there would even assign the `[string]`
   parameter `-Font` and turn the font into text.
 - Hotkeys: `ConvertFrom-HotkeyText` parses and validates (`Get-HotkeyProblem`: no plain keys, no Shift+character,
@@ -256,8 +255,6 @@ features, quick install, key table, links.
 - `Update-StatusText` drops the last key hints until the line fits the popup's width.
 - Context menus use `PsClip.MenuRenderer` (check marks and arrows in the text color). Submenus are separate
   drop-downs: give them the renderer in `Set-Theme` as well.
-- Keep awake (unrelated to the clipboard) is a WinForms timer ticking every second; `Test-KeepAwakeDue` decides,
-  from `GetLastInputInfo`, whether to press F15 (not Pause: that freezes console output).
 - A named mutex `Local\PsClipboardManager` keeps one instance per session.
 
 ## PowerShell pitfalls already hit here
