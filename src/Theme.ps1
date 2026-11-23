@@ -10,13 +10,9 @@ function Test-DarkTheme {
     if ($State.ThemeSetting -eq 'Dark') { return $true }
     if ($State.ThemeSetting -eq 'Light') { return $false }
 
-    try {
-        $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize'
-        return (Get-ItemPropertyValue $key -Name AppsUseLightTheme) -eq 0
-    }
-    catch {
-        return $false
-    }
+    # Auto: the Windows app theme; light when it was never set.
+    $light = Get-UserRegistryValue 'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' 'AppsUseLightTheme'
+    return 0 -eq $light
 }
 
 function Set-Theme {

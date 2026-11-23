@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.2 - 2026-11-23
+
+- psclip no longer writes a warning to the *Windows PowerShell* event log at every start ("Property
+  TextScaleFactor does not exist") when Windows' text size was never changed - nor, with `Theme = Auto`, when the
+  app theme was never set
+
 ## 1.4.1 - 2026-11-20
 
 - Documentation changes

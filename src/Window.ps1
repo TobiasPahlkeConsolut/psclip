@@ -70,16 +70,27 @@ function Set-UiFonts {
     $Ui.SmallFont = [Font]::new($family, [single](8.5 * $factor))
 }
 
+function Get-UserRegistryValue {
+    # A value under HKEY_CURRENT_USER, or $null when it or its key does not exist (or cannot be read). Not
+    # Get-ItemPropertyValue: for a missing value, the registry provider writes a warning to the Windows PowerShell
+    # event log (event 300, "Provider Health") before the error is caught.
+    param([string]$Key, [string]$Name)
+
+    try {
+        [Microsoft.Win32.Registry]::GetValue("HKEY_CURRENT_USER\$Key", $Name, $null)
+    }
+    catch {
+        $null
+    }
+}
+
 function Get-TextScaleFactor {
     # Windows' text size (Settings > Accessibility > Text size), 100 to 225 percent. Windows Forms programs do not
     # follow it by themselves.
-    try {
-        $value = Get-ItemPropertyValue 'HKCU:\Software\Microsoft\Accessibility' -Name TextScaleFactor
-        return [Math]::Min(225, [Math]::Max(100, [int]$value))
-    }
-    catch {
-        return 100   # never changed: no value
-    }
+    $value = Get-UserRegistryValue 'Software\Microsoft\Accessibility' 'TextScaleFactor'
+    $percent = 0
+    if (-not [int]::TryParse([string]$value, [ref]$percent)) { return 100 }   # never changed: no value
+    [Math]::Min(225, [Math]::Max(100, $percent))
 }
 
 function Get-XHeight {

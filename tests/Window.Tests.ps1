@@ -400,18 +400,37 @@ Describe 'Font sizes' {
     }
 
     Context 'the text size was never changed' {
-        Mock Get-ItemPropertyValue { throw 'Property TextScaleFactor does not exist.' }
+        Mock Get-UserRegistryValue { $null }
 
         It 'counts as 100 %' {
             Get-TextScaleFactor | Should Be 100
+            Assert-MockCalled Get-UserRegistryValue -Times 1 -Exactly -Scope It -ParameterFilter {
+                $Key -eq 'Software\Microsoft\Accessibility' -and $Name -eq 'TextScaleFactor'
+            }
+        }
+    }
+
+    Context 'a text size set in Windows' {
+        Mock Get-UserRegistryValue { 150 }
+
+        It 'is taken as it is' {
+            Get-TextScaleFactor | Should Be 150
         }
     }
 
     Context 'a text size beyond what Windows offers' {
-        Mock Get-ItemPropertyValue { 400 }
+        Mock Get-UserRegistryValue { 400 }
 
         It 'is taken as the largest, 225 %' {
             Get-TextScaleFactor | Should Be 225
+        }
+    }
+
+    Context 'a text size value that is not a number' {
+        Mock Get-UserRegistryValue { 'large' }
+
+        It 'counts as 100 %' {
+            Get-TextScaleFactor | Should Be 100
         }
     }
 

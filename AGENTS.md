@@ -272,6 +272,9 @@ features, quick install, key table, links.
   non-generic API or casts in `try/catch` instead.
 - Double quotes inside arguments to native programs are mangled by PowerShell 5.1 (e.g. `git commit -m` with a
   quoted word); pass such text through a file (see Git below).
+- Read registry values with `Get-UserRegistryValue` (`[Microsoft.Win32.Registry]::GetValue`, `$null` when missing),
+  not `Get-ItemPropertyValue`: for a missing value the registry provider writes a warning to the Windows PowerShell
+  event log (event 300, "Provider Health") even when the error is caught - log audits find it.
 - `$input`, `$args`, `$matches`, `$event`, `$sender` and `$this` are automatic variables - do not use them as names.
 - Under StrictMode, `$hashtable.MissingKey` throws; use `ContainsKey` where a key may be missing (e.g. cleanup code).
 - `$PSScriptRoot` is empty in `param()` default values of a script run with `-File` in 5.1; set such defaults in
